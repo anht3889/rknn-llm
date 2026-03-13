@@ -20,6 +20,12 @@ int RKLLMBackend::static_callback(RKLLMResult* result, void* userdata, LLMCallSt
                 generate_ms = result->perf.generate_time_ms;
             }
             self->set_finished(static_cast<int>(state), prefill, completion, prefill_ms, generate_ms);
+            /* Signal stream end immediately so the consumer can finish; do not wait for rkllm_run() to return. */
+            if (self->streaming_mode_) {
+                std::lock_guard<std::mutex> lock(self->run_mutex_);
+                self->stream_finished_ = true;
+                self->stream_cv_.notify_all();
+            }
         }
     }
     return 0;
