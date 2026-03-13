@@ -1,7 +1,9 @@
 #include "chat_handler.hpp"
 #include "rkllm_backend.hpp"
 #include "fix_freq.hpp"
+#include "tts_handler.hpp"
 #include "httplib.h"
+#include <nlohmann/json.hpp>
 #if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
 #include "image_encoder.hpp"
 #endif
@@ -11,8 +13,19 @@
 #include <string>
 #include <cstring>
 #include <vector>
+#include <sstream>
 
 static std::string model_id = "rkllm";
+
+/** Split a command string into argv (by spaces). */
+static std::vector<std::string> split_runner_cmd(const std::string& cmd) {
+    std::vector<std::string> out;
+    std::istringstream iss(cmd);
+    std::string s;
+    while (iss >> s)
+        out.push_back(std::move(s));
+    return out;
+}
 
 /**
  * Auto-detect Rockchip platform by reading /proc/device-tree/compatible.
@@ -58,6 +71,8 @@ int main(int argc, char* argv[]) {
     std::string encoder_model_path;
     std::string img_start, img_end, img_content;
     int encoder_core_num = 1;
+    std::string tts_model_path;
+    std::string tts_runner = "python3 -m rkllama.scripts.piper_tts_cli";
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--model_path") == 0 && i + 1 < argc) {
@@ -88,6 +103,10 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--encoder_core_num") == 0 && i + 1 < argc) {
             encoder_core_num = std::stoi(argv[++i]);
 #endif
+        } else if (strcmp(argv[i], "--tts_model_path") == 0 && i + 1 < argc) {
+            tts_model_path = argv[++i];
+        } else if (strcmp(argv[i], "--tts_runner") == 0 && i + 1 < argc) {
+            tts_runner = argv[++i];
         } else if (strcmp(argv[i], "--debug") == 0) {
             debug = true;
         } else if (strcmp(argv[i], "--help") == 0) {
@@ -97,7 +116,7 @@ int main(int argc, char* argv[]) {
 #if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
                       << "       [--encoder_model_path <path>] [--img_start <s>] [--img_end <s>] [--img_content <s>] [--encoder_core_num 1]\n"
 #endif
-                      << "       [--no-fix-freq] [--debug]\n"
+                      << "       [--tts_model_path <path>] [--tts_runner <cmd>] [--no-fix-freq] [--debug]\n"
                       << "       Platform default: auto. Use --no-fix-freq to skip NPU/CPU/GPU/DDR frequency fix (requires root).\n";
             return 0;
         }
@@ -154,6 +173,9 @@ int main(int argc, char* argv[]) {
 
     rkllm_openai::ChatHandler chat_handler(&backend, debug, encode_image);
 
+    std::vector<std::string> tts_runner_argv = split_runner_cmd(tts_runner);
+    rkllm_openai::TtsHandler tts_handler(tts_model_path, std::move(tts_runner_argv));
+
     httplib::Server svr;
     /* Allow long write timeout for streaming (token-by-token) responses. */
     svr.set_write_timeout(300, 0);
@@ -178,6 +200,27 @@ int main(int argc, char* argv[]) {
         /* else: streaming was set up (Content-Type and body via chunked provider) */
     });
 
+    svr.Post("/v1/audio/speech", [&tts_handler](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        auto [audio, content_type] = tts_handler.handle_speech(req.body);
+        if (content_type.empty()) {
+            res.set_header("Content-Type", "application/json");
+            try {
+                auto err = nlohmann::json::parse(std::string(audio.begin(), audio.end()));
+                if (err.contains("error") && err["error"].contains("type") && err["error"]["type"] == "server_error")
+                    res.status = 500;
+                else
+                    res.status = 400;
+            } catch (...) {
+                res.status = 500;
+            }
+            res.set_content(std::string(audio.begin(), audio.end()), "application/json");
+        } else {
+            res.set_header("Content-Type", content_type);
+            res.set_content(std::string(audio.begin(), audio.end()), content_type);
+        }
+    });
+
     svr.set_error_handler([](const httplib::Request&, httplib::Response& res) {
         if (res.status == 404)
             res.set_content("{\"error\":{\"message\":\"Not found\",\"type\":\"invalid_request_error\"}}", "application/json");
@@ -186,6 +229,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Listening on " << host << ":" << port << "\n";
     std::cout << "  GET  /v1/models\n";
     std::cout << "  POST /v1/chat/completions\n";
+    if (tts_handler.enabled())
+        std::cout << "  POST /v1/audio/speech (Piper TTS)\n";
 
     if (!svr.bind_to_port(host.c_str(), port)) {
         std::cerr << "Error: bind failed.\n";

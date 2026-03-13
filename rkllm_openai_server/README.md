@@ -60,6 +60,11 @@ When built with **multimodal** support (`-DENABLE_MULTIMODAL=ON`, see below):
 - `--img_start`, `--img_end`, `--img_content`: Vision prompt tokens for the LLM (default `<|vision_start|>`, `<|vision_end|>`, `<|image_pad|>` when encoder is set).
 - `--encoder_core_num`: NPU core count for the encoder (default `1`).
 
+**Piper TTS (optional):**
+
+- `--tts_model_path`: Path to a Piper TTS model directory (must contain `piper.json`, `.onnx` encoder, and `.rknn` decoder). When set, enables `POST /v1/audio/speech`.
+- `--tts_runner`: Command to run the Piper TTS helper (default: `python3 -m rkllama.scripts.piper_tts_cli`). The runner reads JSON from stdin and writes `Content-Type: <type>\n` plus raw audio to stdout. Requires the rkllama Python package and its Piper dependencies (onnxruntime, rknnlite, piper, pydub) on the device; set `PYTHONPATH` to include rkllama’s `src` directory if the module is not installed.
+
 ## Multimodal (vision) build
 
 To support image inputs (like `examples/multimodal_model_demo`), build with OpenCV, RKNN runtime, and the demo’s image encoder:
@@ -114,6 +119,36 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"rkllm","messages":[{"role":"user","content":"Hello"}]}'
 ```
+
+### POST /v1/audio/speech (Piper TTS)
+
+Available when the server is started with `--tts_model_path`. **Only Piper TTS** is supported (model directory must contain `piper.json`).
+
+Request body (JSON):
+
+- `input` (required): Text to synthesize.
+- `voice` (optional): Voice name (if the Piper model has multiple speakers).
+- `response_format` (optional): Output format: `wav`, `mp3`, `opus`, `aac`, `flac`, or `pcm`. Default: `wav`. OpenAI-style `response_format: { "type": "mp3" }` is also accepted.
+- `speed` (optional): Speech speed (e.g. `1.0` = normal).
+
+Response: Raw audio bytes with the appropriate `Content-Type` (e.g. `audio/wav`, `audio/mpeg`).
+
+Example:
+
+```bash
+curl -X POST http://localhost:8080/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"input":"Hello, world.","response_format":"wav"}' \
+  --output speech.wav
+```
+
+Run with TTS enabled:
+
+```bash
+./rkllm_openai_server --model_path /path/to/model.rkllm --tts_model_path /path/to/piper_model
+```
+
+Ensure Python 3, rkllama (with Piper TTS dependencies), and the Piper model files (`.onnx`, `.rknn`, `piper.json`) are available on the device.
 
 ## Python client
 

@@ -47,6 +47,7 @@ set(SERVER_SOURCES
     src/main.cpp
     src/rkllm_backend.cpp
     src/chat_handler.cpp
+    src/tts_handler.cpp
     src/fix_freq.cpp
     src/base64.cpp
 )
