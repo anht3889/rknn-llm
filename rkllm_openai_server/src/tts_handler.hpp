@@ -1,6 +1,7 @@
 #ifndef RKLLM_OPENAI_SERVER_TTS_HANDLER_HPP
 #define RKLLM_OPENAI_SERVER_TTS_HANDLER_HPP
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
