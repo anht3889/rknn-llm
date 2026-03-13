@@ -47,6 +47,7 @@ add_executable(rkllm_openai_server
     src/main.cpp
     src/rkllm_backend.cpp
     src/chat_handler.cpp
+    src/fix_freq.cpp
 )
 
 target_link_libraries(rkllm_openai_server PRIVATE ${RKLLM_RT_LIB})

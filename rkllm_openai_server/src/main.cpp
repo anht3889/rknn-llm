@@ -1,5 +1,6 @@
 #include "chat_handler.hpp"
 #include "rkllm_backend.hpp"
+#include "fix_freq.hpp"
 #include "httplib.h"
 #include <iostream>
 #include <fstream>
@@ -49,6 +50,7 @@ int main(int argc, char* argv[]) {
     int max_context_len = 4096;
     int max_new_tokens = 4096;
     std::string prompt_cache_path;
+    bool fix_freq = true;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--model_path") == 0 && i + 1 < argc) {
@@ -65,13 +67,16 @@ int main(int argc, char* argv[]) {
             max_new_tokens = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "--prompt_cache") == 0 && i + 1 < argc) {
             prompt_cache_path = argv[++i];
+        } else if (strcmp(argv[i], "--no-fix-freq") == 0) {
+            fix_freq = false;
         } else if (strcmp(argv[i], "--debug") == 0) {
             debug = true;
         } else if (strcmp(argv[i], "--help") == 0) {
             std::cerr << "Usage: " << argv[0]
                       << " --model_path <path> [--platform auto|rk3588|rk3576|rv1126b|rk3562] [--host 0.0.0.0] [--port 8080]\n"
-                      << "       [--max_context_len 4096] [--max_new_tokens 4096] [--prompt_cache <path>] [--debug]\n"
-                      << "       Platform default: auto (detect from /proc/device-tree/compatible).\n";
+                      << "       [--max_context_len 4096] [--max_new_tokens 4096] [--prompt_cache <path>]\n"
+                      << "       [--no-fix-freq] [--debug]\n"
+                      << "       Platform default: auto. Use --no-fix-freq to skip NPU/CPU/GPU/DDR frequency fix (requires root).\n";
             return 0;
         }
     }
@@ -84,6 +89,11 @@ int main(int argc, char* argv[]) {
         } else {
             std::cout << "Detected platform: " << platform << "\n";
         }
+    }
+
+    if (fix_freq) {
+        std::cout << "Applying fix_freq for " << platform << " (NPU/CPU/GPU/DDR to max freq)...\n";
+        rkllm_openai::apply_fix_freq(platform, debug);
     }
 
     if (model_path.empty()) {

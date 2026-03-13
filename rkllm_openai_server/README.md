@@ -40,7 +40,7 @@ Ensure `librkllmrt.so` is present at `rkllm-runtime/Linux/librkllm_api/aarch64/`
 ./rkllm_openai_server --model_path /path/to/model.rkllm [--platform auto] [--host 0.0.0.0] [--port 8080]
 ```
 
-On a Rockchip board (e.g. RK3588), platform is auto-detected by default; you can omit `--platform` or pass `--platform rk3588` explicitly.
+On a Rockchip board (e.g. RK3588), platform is auto-detected by default; you can omit `--platform` or pass `--platform rk3588` explicitly. Before loading the model, the server applies **fix_freq** for the detected platform (same behavior as the Python Flask server running `sudo bash fix_freq_<platform>.sh`). Run with `sudo` if you want fix_freq to succeed; otherwise use `--no-fix-freq` to skip it.
 
 Options:
 
@@ -51,6 +51,7 @@ Options:
 - `--max_context_len`: Maximum context length (tokens). Default: `4096`. Lower values reduce KV cache memory and can improve prefill/generate speed on constrained devices.
 - `--max_new_tokens`: Maximum new tokens per response. Default: `4096`. Lower if you don't need long replies.
 - `--prompt_cache`: Path to a pre-built prompt cache file. If set, the runtime loads it after init to skip re-prefill for the cached prefix (faster first token when using the same system/template).
+- `--no-fix-freq`: Skip applying fix_freq (do not lock NPU/CPU/GPU/DDR to max frequency). By default, the server applies the same fix as `scripts/fix_freq_<platform>.sh` using the detected or given platform; this requires root (e.g. run with `sudo`).
 - `--debug`: Log prefill/generate token counts and speeds (tokens/s) to stderr for each request.
 
 ## API
