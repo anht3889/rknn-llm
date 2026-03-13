@@ -47,38 +47,20 @@ bool RKLLMBackend::init(const std::string& model_path,
     model_path_ = model_path;
     platform_ = platform;
 
-    RKLLMParam param;
-    std::memset(&param, 0, sizeof(param));
-
+    /* Match working llm_demo exactly: use createDefaultParam() and only override same fields. */
+    RKLLMParam param = rkllm_createDefaultParam();
     param.model_path = model_path_.c_str();
-    param.max_context_len = max_context_len;
-    param.max_new_tokens = max_new_tokens;
     param.top_k = 1;
-    param.n_keep = -1;
     param.top_p = top_p;
     param.temperature = temperature;
     param.repeat_penalty = 1.1f;
     param.frequency_penalty = 0.0f;
     param.presence_penalty = 0.0f;
-    param.mirostat = 0;
-    param.mirostat_tau = 5.0f;
-    param.mirostat_eta = 0.1f;
+    param.max_new_tokens = max_new_tokens;
+    param.max_context_len = max_context_len;
     param.skip_special_token = true;
-    param.is_async = false;
-    param.img_start = "";
-    param.img_end = "";
-    param.img_content = nullptr;
-
     param.extend_param.base_domain_id = 0;
     param.extend_param.embed_flash = 1;
-    param.extend_param.enabled_cpus_num = 4;
-    param.extend_param.n_batch = 1;
-    param.extend_param.use_cross_attn = 0;
-    if (platform == "rk3576" || platform == "rk3588") {
-        param.extend_param.enabled_cpus_mask = (1u << 4) | (1u << 5) | (1u << 6) | (1u << 7);
-    } else {
-        param.extend_param.enabled_cpus_mask = (1u << 0) | (1u << 1) | (1u << 2) | (1u << 3);
-    }
 
     int ret = rkllm_init(&handle_, &param, static_callback);
     return ret == 0;
