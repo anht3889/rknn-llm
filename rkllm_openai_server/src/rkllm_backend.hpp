@@ -4,6 +4,8 @@
 #include <cstddef>
 #include "rkllm.h"
 #include <string>
+#include <utility>
+#include <vector>
 #include <mutex>
 #include <condition_variable>
 #include <queue>
@@ -21,6 +23,9 @@ struct MultimodalInput {
     size_t image_width = 0;
     size_t image_height = 0;
 };
+
+/** Result of encoding an image: embedding vector + MultimodalInput (image_embed points into the vector). */
+using MultimodalInputResult = std::pair<std::vector<float>, MultimodalInput>;
 
 struct RunResult {
     std::string content;

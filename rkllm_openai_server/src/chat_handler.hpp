@@ -10,9 +10,6 @@
 
 namespace rkllm_openai {
 
-/** Result of encoding an image: embedding vector + MultimodalInput (image_embed points into the vector). */
-using MultimodalInputResult = std::pair<std::vector<float>, MultimodalInput>;
-
 /** Optional image encoder: (image bytes) -> (embedding + MultimodalInput) or nullopt if disabled/failed. */
 using EncodeImageFn = std::function<std::optional<MultimodalInputResult>(const std::vector<uint8_t>&)>;
 
