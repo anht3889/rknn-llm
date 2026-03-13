@@ -34,11 +34,17 @@ void PiperTts::release() {
 }
 
 std::vector<uint8_t> PiperTts::synthesize(const std::string& text, const std::string& voice, float speed) {
-    if (!initialized_ || text.empty()) return {};
+    last_error_.clear();
+    if (!initialized_ || text.empty()) {
+        last_error_ = "TTS not initialized or empty input.";
+        return {};
+    }
 
     std::vector<int64_t> phoneme_ids;
-    if (!phonemizer_.phonemize(config_, text, phoneme_ids) || phoneme_ids.empty())
+    if (!phonemizer_.phonemize(config_, text, phoneme_ids) || phoneme_ids.empty()) {
+        last_error_ = "Phonemization failed. Install espeak-ng (libespeak-ng-dev) and rebuild with ENABLE_TTS=ON, or use Python TTS (--tts_runner).";
         return {};
+    }
 
     float length_scale = config_.length_scale;
     if (speed > 0.f) length_scale = 1.f / speed;
@@ -51,14 +57,22 @@ std::vector<uint8_t> PiperTts::synthesize(const std::string& text, const std::st
     std::vector<float> z, y_mask;
     if (!encoder_.run(phoneme_ids.data(), phoneme_ids.size(),
                       config_.noise_scale, length_scale, config_.noise_w_scale,
-                      speaker_id, z, y_mask))
+                      speaker_id, z, y_mask)) {
+        last_error_ = "ONNX encoder failed (check model and input).";
         return {};
+    }
 
     size_t chunk_time = decoder_.get_chunk_time();
-    if (chunk_time == 0) return {};
+    if (chunk_time == 0) {
+        last_error_ = "Decoder chunk size is zero.";
+        return {};
+    }
     size_t C = encoder_.get_z_channels();
     size_t T = encoder_.get_z_time();
-    if (C == 0 || T == 0 || z.size() != C * T || y_mask.size() != T) return {};
+    if (C == 0 || T == 0 || z.size() != C * T || y_mask.size() != T) {
+        last_error_ = "Encoder output shape mismatch.";
+        return {};
+    }
 
     const size_t step = chunk_time;
     std::vector<float> audio_all;
@@ -73,8 +87,10 @@ std::vector<uint8_t> PiperTts::synthesize(const std::string& text, const std::st
         memcpy(y_chunk.data(), y_mask.data() + start, cur_len * sizeof(float));
 
         std::vector<float> out_chunk;
-        if (!decoder_.run_chunk(z_chunk.data(), y_chunk.data(), out_chunk))
+        if (!decoder_.run_chunk(z_chunk.data(), y_chunk.data(), out_chunk)) {
+            last_error_ = "RKNN decoder failed.";
             return {};
+        }
 
         if (need_pad) {
             size_t out_total = out_chunk.size();

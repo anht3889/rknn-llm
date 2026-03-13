@@ -68,7 +68,9 @@ std::pair<std::vector<uint8_t>, std::string> TtsHandler::handle_speech(const std
         std::vector<uint8_t> wav = native_tts_->synthesize(input, voice, static_cast<float>(speed > 0.0 ? speed : 1.0));
         if (wav.empty()) {
             json err;
-            err["error"] = {{"message", "TTS synthesis failed (check phonemizer/model)"}, {"type", "server_error"}};
+            std::string msg = native_tts_->get_last_error();
+            if (msg.empty()) msg = "TTS synthesis failed (check phonemizer/model).";
+            err["error"] = {{"message", msg}, {"type", "server_error"}};
             return {std::vector<uint8_t>(err.dump().begin(), err.dump().end()), ""};
         }
         return {wav, "audio/wav"};

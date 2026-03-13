@@ -30,9 +30,12 @@ public:
      * Synthesize text to WAV bytes.
      * voice: speaker name (optional; use empty for default).
      * speed: > 0 to scale length (e.g. 1.0 = normal); applied via length_scale = 1/speed.
-     * Returns WAV bytes on success; empty on error.
+     * Returns WAV bytes on success; empty on error. Use get_last_error() for the reason.
      */
     std::vector<uint8_t> synthesize(const std::string& text, const std::string& voice, float speed);
+
+    /** Last failure reason after synthesize() returned empty. */
+    const std::string& get_last_error() const { return last_error_; }
 
 private:
     bool initialized_ = false;
@@ -41,6 +44,7 @@ private:
     PiperEncoder encoder_;
     PiperDecoder decoder_;
     PiperPhonemizer phonemizer_;
+    mutable std::string last_error_;
 };
 
 }  // namespace rkllm_openai
