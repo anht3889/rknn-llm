@@ -101,7 +101,7 @@ Request body (JSON):
 
 - `model` (optional): Echoed in the response; no effect on inference.
 - `messages`: Array of `{ "role": "user"|"system"|"assistant"|"tool", "content": "..." }`. The last `user` or `tool` message is used as the prompt; `system` is used as system prompt (e.g. for function tools). For **multimodal** (when the server is started with `--encoder_model_path`), `content` may be an array of parts: `{ "type": "text", "text": "..." }` and `{ "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,..." } }`. Text and image parts are combined; the image is encoded by the vision encoder and sent to the LLM with the text (one image per request).
-- `stream` (optional): If `true`, the server returns an error (streaming is not supported; the RKLLM runtime does not support token-by-token streaming). Omit or set to `false` for a single JSON response.
+- `stream` (optional): If `true`, the server streams the response as Server-Sent Events (SSE), one chunk per token (OpenAI-compatible `data: {...}\n\n` and `data: [DONE]\n\n`). Omit or set to `false` for a single JSON response.
 - `enable_thinking` (optional): Enable thinking mode (e.g. Qwen3).
 - `tools` (optional): JSON array of tool definitions for function calling (same format as OpenAI tools).
 
@@ -117,7 +117,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 
 ## Python client
 
-You can use the existing `examples/rkllm_server_demo/chat_api_flask.py` by changing the URL to `http://<board_ip>:8080/v1/chat/completions` and the request format to the same `model` / `messages` JSON. Do not set `stream: true` (streaming is not supported).
+You can use the existing `examples/rkllm_server_demo/chat_api_flask.py` by changing the URL to `http://<board_ip>:8080/v1/chat/completions` and the request format to the same `model` / `messages` JSON. Set `stream: true` for token-by-token streaming (SSE); the server returns OpenAI-style `data: ...` lines ending with `data: [DONE]\n\n`.
 
 ## Concurrency
 

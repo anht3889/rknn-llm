@@ -155,6 +155,8 @@ int main(int argc, char* argv[]) {
     rkllm_openai::ChatHandler chat_handler(&backend, debug, encode_image);
 
     httplib::Server svr;
+    /* Allow long write timeout for streaming (token-by-token) responses. */
+    svr.set_write_timeout(300, 0);
 
     svr.Get("/v1/models", [](const httplib::Request&, httplib::Response& res) {
         res.set_header("Content-Type", "application/json");
@@ -164,13 +166,16 @@ int main(int argc, char* argv[]) {
     });
 
     svr.Post("/v1/chat/completions", [&chat_handler](const httplib::Request& req, httplib::Response& res) {
-        res.set_header("Content-Type", "application/json");
         res.set_header("Access-Control-Allow-Origin", "*");
 
-        std::string out = chat_handler.handle_chat_completions(req.body);
-        if (out.find("\"error\"") != std::string::npos && out.find("\"status\":503") != std::string::npos)
-            res.status = 503;
-        res.set_content(out, "application/json");
+        std::string out = chat_handler.handle_chat_completions(req.body, &res);
+        if (!out.empty()) {
+            res.set_header("Content-Type", "application/json");
+            if (out.find("\"error\"") != std::string::npos && out.find("\"status\":503") != std::string::npos)
+                res.status = 503;
+            res.set_content(out, "application/json");
+        }
+        /* else: streaming was set up (Content-Type and body via chunked provider) */
     });
 
     svr.set_error_handler([](const httplib::Request&, httplib::Response& res) {

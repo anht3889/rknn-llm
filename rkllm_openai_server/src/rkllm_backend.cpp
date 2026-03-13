@@ -29,6 +29,8 @@ void RKLLMBackend::push_chunk(const char* text) {
     if (!text) return;
     std::lock_guard<std::mutex> lock(run_mutex_);
     chunk_queue_.push(std::string(text));
+    if (streaming_mode_)
+        stream_cv_.notify_one();
 }
 
 void RKLLMBackend::set_finished(int state, int prefill, int completion, float prefill_ms, float generate_ms) {
@@ -166,6 +168,107 @@ RunResult RKLLMBackend::run(const std::string& prompt,
     out.generate_time_ms = generate_time_ms_;
     out.error = (ret != 0 || call_state_.load() == static_cast<int>(RKLLM_RUN_ERROR));
     return out;
+}
+
+void RKLLMBackend::run_streaming_thread(const std::string& prompt,
+                                        const std::string& role,
+                                        bool enable_thinking,
+                                        const std::string* tools_json,
+                                        const std::string* system_prompt,
+                                        const MultimodalInput* multimodal) {
+    if (!handle_) return;
+
+    if (tools_json && !tools_json->empty() && system_prompt) {
+        rkllm_set_function_tools(handle_, system_prompt->c_str(),
+                                 tools_json->c_str(), "tool_response");
+    }
+
+    RKLLMInput rkllm_input;
+    std::memset(&rkllm_input, 0, sizeof(rkllm_input));
+    rkllm_input.role = role.empty() ? "user" : role.c_str();
+    rkllm_input.enable_thinking = enable_thinking;
+    if (multimodal && multimodal->image_embed && multimodal->n_image_tokens > 0) {
+        rkllm_input.input_type = RKLLM_INPUT_MULTIMODAL;
+        rkllm_input.multimodal_input.prompt = const_cast<char*>(prompt.c_str());
+        rkllm_input.multimodal_input.image_embed = const_cast<float*>(multimodal->image_embed);
+        rkllm_input.multimodal_input.n_image_tokens = multimodal->n_image_tokens;
+        rkllm_input.multimodal_input.n_image = multimodal->n_image > 0 ? multimodal->n_image : 1;
+        rkllm_input.multimodal_input.image_width = multimodal->image_width;
+        rkllm_input.multimodal_input.image_height = multimodal->image_height;
+    } else {
+        rkllm_input.input_type = RKLLM_INPUT_PROMPT;
+        rkllm_input.prompt_input = prompt.c_str();
+    }
+
+    RKLLMInferParam rkllm_infer_params;
+    std::memset(&rkllm_infer_params, 0, sizeof(rkllm_infer_params));
+    rkllm_infer_params.mode = RKLLM_INFER_GENERATE;
+    rkllm_infer_params.keep_history = 0;
+    rkllm_infer_params.lora_params = nullptr;
+    rkllm_infer_params.prompt_cache_params = nullptr;
+
+    (void)rkllm_run(handle_, &rkllm_input, &rkllm_infer_params, this);
+
+    {
+        std::lock_guard<std::mutex> lock(run_mutex_);
+        streaming_mode_ = false;
+        stream_finished_ = true;
+        stream_cv_.notify_all();
+    }
+}
+
+bool RKLLMBackend::run_streaming_start(const std::string& prompt,
+                                        const std::string& role,
+                                        bool enable_thinking,
+                                        const std::string* tools_json,
+                                        const std::string* system_prompt,
+                                        const MultimodalInput* multimodal) {
+    if (!handle_) return false;
+
+    std::lock_guard<std::mutex> serial_lock(serialize_mutex_);
+
+    {
+        std::lock_guard<std::mutex> lock(run_mutex_);
+        while (!chunk_queue_.empty()) chunk_queue_.pop();
+    }
+    call_state_.store(-1);
+    prefill_tokens_ = 0;
+    completion_tokens_ = 0;
+    prefill_time_ms_ = 0.f;
+    generate_time_ms_ = 0.f;
+    stream_finished_ = false;
+    streaming_mode_ = true;
+    if (run_thread_.joinable())
+        run_thread_.join();
+
+    run_thread_ = std::thread(&RKLLMBackend::run_streaming_thread, this,
+                              prompt, role, enable_thinking,
+                              tools_json, system_prompt, multimodal);
+    return true;
+}
+
+bool RKLLMBackend::pop_stream_chunk(std::string& chunk, RunResult& out) {
+    chunk.clear();
+    out = RunResult{};
+    std::unique_lock<std::mutex> lock(run_mutex_);
+    stream_cv_.wait(lock, [this] {
+        return !chunk_queue_.empty() || stream_finished_;
+    });
+    if (!chunk_queue_.empty()) {
+        chunk = std::move(chunk_queue_.front());
+        chunk_queue_.pop();
+        return true;
+    }
+    /* stream_finished_ && queue empty */
+    if (run_thread_.joinable())
+        run_thread_.join();
+    streaming_mode_ = false;
+    out.prefill_tokens = prefill_tokens_;
+    out.completion_tokens = completion_tokens_;
+    out.prefill_time_ms = prefill_time_ms_;
+    out.generate_time_ms = generate_time_ms_;
+    out.error = (call_state_.load() == static_cast<int>(RKLLM_RUN_ERROR));
+    return false;
 }
 
 }  // namespace rkllm_openai

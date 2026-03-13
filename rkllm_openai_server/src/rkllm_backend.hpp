@@ -10,6 +10,8 @@
 #include <mutex>
 #include <queue>
 #include <memory>
+#include <thread>
+#include <condition_variable>
 
 namespace rkllm_openai {
 
@@ -61,6 +63,17 @@ public:
                  const std::string* system_prompt,
                  const MultimodalInput* multimodal = nullptr);
 
+    /** Start inference in a background thread for streaming. Call pop_stream_chunk() until done. */
+    bool run_streaming_start(const std::string& prompt,
+                             const std::string& role,
+                             bool enable_thinking,
+                             const std::string* tools_json,
+                             const std::string* system_prompt,
+                             const MultimodalInput* multimodal = nullptr);
+
+    /** Block until next token chunk or stream end. Returns true if chunk is valid; false if stream finished (check out.error). */
+    bool pop_stream_chunk(std::string& chunk, RunResult& out);
+
     void abort();
 
 private:
@@ -70,6 +83,7 @@ private:
 
     std::mutex serialize_mutex_;  /* one inference at a time */
     mutable std::mutex run_mutex_;
+    std::condition_variable stream_cv_;
     std::queue<std::string> chunk_queue_;  /* filled by callback during rkllm_run */
     std::atomic<int> call_state_{ -1 };
     int prefill_tokens_ = 0;
@@ -77,9 +91,19 @@ private:
     float prefill_time_ms_ = 0.f;
     float generate_time_ms_ = 0.f;
 
+    bool streaming_mode_ = false;
+    bool stream_finished_ = false;
+    std::thread run_thread_;
+
     static int static_callback(RKLLMResult* result, void* userdata, LLMCallState state);
     void push_chunk(const char* text);
     void set_finished(int state, int prefill, int completion, float prefill_ms, float generate_ms);
+    void run_streaming_thread(const std::string& prompt,
+                              const std::string& role,
+                              bool enable_thinking,
+                              const std::string* tools_json,
+                              const std::string* system_prompt,
+                              const MultimodalInput* multimodal);
 };
 
 }  // namespace rkllm_openai

@@ -17,7 +17,8 @@ class ChatHandler {
 public:
     ChatHandler(RKLLMBackend* backend, bool debug = false, EncodeImageFn encode_image = nullptr);
 
-    std::string handle_chat_completions(const std::string& body);
+    /** If body has "stream":true and res is non-null (httplib::Response*), sets up SSE streaming and returns "". */
+    std::string handle_chat_completions(const std::string& body, void* res = nullptr);
 
 private:
     RKLLMBackend* backend_;
