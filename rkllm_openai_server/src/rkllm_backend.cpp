@@ -13,11 +13,14 @@ int RKLLMBackend::static_callback(RKLLMResult* result, void* userdata, LLMCallSt
             self->push_chunk(result->text);
         if (state == RKLLM_RUN_FINISH || state == RKLLM_RUN_ERROR) {
             int prefill = 0, completion = 0;
+            float prefill_ms = 0.f, generate_ms = 0.f;
             if (state == RKLLM_RUN_FINISH) {
                 prefill = result->perf.prefill_tokens;
                 completion = result->perf.generate_tokens;
+                prefill_ms = result->perf.prefill_time_ms;
+                generate_ms = result->perf.generate_time_ms;
             }
-            self->set_finished(static_cast<int>(state), prefill, completion);
+            self->set_finished(static_cast<int>(state), prefill, completion, prefill_ms, generate_ms);
         }
     }
     return 0;
@@ -30,10 +33,12 @@ void RKLLMBackend::push_chunk(const char* text) {
     stream_cv_.notify_one();
 }
 
-void RKLLMBackend::set_finished(int state, int prefill, int completion) {
+void RKLLMBackend::set_finished(int state, int prefill, int completion, float prefill_ms, float generate_ms) {
     call_state_.store(state);
     prefill_tokens_ = prefill;
     completion_tokens_ = completion;
+    prefill_time_ms_ = prefill_ms;
+    generate_time_ms_ = generate_ms;
     run_finished_.store(true);
     stream_cv_.notify_one();
 }
@@ -106,6 +111,8 @@ RunResult RKLLMBackend::run(const std::string& prompt,
     run_finished_.store(false);
     prefill_tokens_ = 0;
     completion_tokens_ = 0;
+    prefill_time_ms_ = 0.f;
+    generate_time_ms_ = 0.f;
 
     if (tools_json && !tools_json->empty() && system_prompt) {
         rkllm_set_function_tools(handle_, system_prompt->c_str(),
@@ -139,6 +146,8 @@ RunResult RKLLMBackend::run(const std::string& prompt,
         out.content = accumulated;
         out.prefill_tokens = prefill_tokens_;
         out.completion_tokens = completion_tokens_;
+        out.prefill_time_ms = prefill_time_ms_;
+        out.generate_time_ms = generate_time_ms_;
         out.error = (ret != 0 || call_state_.load() == static_cast<int>(RKLLM_RUN_ERROR));
         return out;
     }
@@ -166,6 +175,8 @@ RunResult RKLLMBackend::run(const std::string& prompt,
 
     out.prefill_tokens = prefill_tokens_;
     out.completion_tokens = completion_tokens_;
+    out.prefill_time_ms = prefill_time_ms_;
+    out.generate_time_ms = generate_time_ms_;
     out.error = (call_state_.load() == static_cast<int>(RKLLM_RUN_ERROR));
     return out;
 }

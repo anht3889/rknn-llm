@@ -12,6 +12,7 @@ int main(int argc, char* argv[]) {
     std::string platform = "rk3588";
     std::string host = "0.0.0.0";
     int port = 8080;
+    bool debug = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--model_path") == 0 && i + 1 < argc) {
@@ -22,9 +23,11 @@ int main(int argc, char* argv[]) {
             host = argv[++i];
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--debug") == 0) {
+            debug = true;
         } else if (strcmp(argv[i], "--help") == 0) {
             std::cerr << "Usage: " << argv[0]
-                      << " --model_path <path> [--platform rk3588|rk3576] [--host 0.0.0.0] [--port 8080]\n";
+                      << " --model_path <path> [--platform rk3588|rk3576] [--host 0.0.0.0] [--port 8080] [--debug]\n";
             return 0;
         }
     }
@@ -41,7 +44,7 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "RKLLM init success.\n";
 
-    rkllm_openai::ChatHandler chat_handler(&backend);
+    rkllm_openai::ChatHandler chat_handler(&backend, debug);
 
     httplib::Server svr;
 

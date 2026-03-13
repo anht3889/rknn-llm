@@ -9,7 +9,7 @@ namespace rkllm_openai {
 
 class ChatHandler {
 public:
-    explicit ChatHandler(RKLLMBackend* backend);
+    ChatHandler(RKLLMBackend* backend, bool debug = false);
 
     std::string handle_chat_completions(const std::string& body,
                                         bool stream,
@@ -17,10 +17,12 @@ public:
 
 private:
     RKLLMBackend* backend_;
+    bool debug_;
 
     nlohmann::json parse_messages_and_run(const nlohmann::json& data,
                                           bool stream,
                                           std::function<void(const std::string&)> stream_write);
+    void log_debug_stats(const RunResult& r) const;
 };
 
 }  // namespace rkllm_openai

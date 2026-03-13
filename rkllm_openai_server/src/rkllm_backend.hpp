@@ -17,6 +17,8 @@ struct RunResult {
     std::string content;
     int prefill_tokens = 0;
     int completion_tokens = 0;
+    float prefill_time_ms = 0.f;
+    float generate_time_ms = 0.f;
     bool error = false;
 };
 
@@ -59,10 +61,12 @@ private:
     std::atomic<bool> run_finished_{ false };
     int prefill_tokens_ = 0;
     int completion_tokens_ = 0;
+    float prefill_time_ms_ = 0.f;
+    float generate_time_ms_ = 0.f;
 
     static int static_callback(RKLLMResult* result, void* userdata, LLMCallState state);
     void push_chunk(const char* text);
-    void set_finished(int state, int prefill, int completion);
+    void set_finished(int state, int prefill, int completion, float prefill_ms, float generate_ms);
 };
 
 }  // namespace rkllm_openai

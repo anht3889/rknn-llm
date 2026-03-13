@@ -2,12 +2,27 @@
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <chrono>
+#include <iostream>
+#include <iomanip>
 
 namespace rkllm_openai {
 
 using json = nlohmann::json;
 
-ChatHandler::ChatHandler(RKLLMBackend* backend) : backend_(backend) {}
+ChatHandler::ChatHandler(RKLLMBackend* backend, bool debug) : backend_(backend), debug_(debug) {}
+
+void ChatHandler::log_debug_stats(const RunResult& r) const {
+    if (!debug_) return;
+    float prefill_tps = (r.prefill_time_ms > 0.f) ? (r.prefill_tokens / (r.prefill_time_ms / 1000.f)) : 0.f;
+    float gen_tps = (r.generate_time_ms > 0.f) ? (r.completion_tokens / (r.generate_time_ms / 1000.f)) : 0.f;
+    std::cerr << "[rkllm_debug] prefill_tokens=" << r.prefill_tokens
+              << " prefill_time_ms=" << std::fixed << std::setprecision(2) << r.prefill_time_ms
+              << " prefill_speed=" << std::setprecision(1) << prefill_tps << " tok/s"
+              << " | generate_tokens=" << r.completion_tokens
+              << " generate_time_ms=" << std::setprecision(2) << r.generate_time_ms
+              << " generate_speed=" << std::setprecision(1) << gen_tps << " tok/s"
+              << std::endl;
+}
 
 std::string ChatHandler::handle_chat_completions(const std::string& body,
                                                  bool stream,
@@ -91,6 +106,7 @@ json ChatHandler::parse_messages_and_run(const json& data,
 
     if (!stream) {
         RunResult run_result = backend_->run(prompt, role, enable_thinking, tools_ptr, sys_ptr, false, nullptr);
+        if (debug_) log_debug_stats(run_result);
         if (run_result.error) {
             json err;
             err["error"] = {{"message", "Inference failed"}, {"type", "server_error"}};
@@ -131,6 +147,7 @@ json ChatHandler::parse_messages_and_run(const json& data,
             if (stream_write)
                 stream_write(chunk_obj.dump() + "\n");
         });
+    if (debug_) log_debug_stats(run_result);
 
     json finish_obj;
     finish_obj["id"] = id;

@@ -46,6 +46,7 @@ Options:
 - `--platform`: One of `rk3588`, `rk3576`, `rv1126b`, `rk3562`. Default: `rk3588`.
 - `--host`: Bind address. Default: `0.0.0.0`.
 - `--port`: Port. Default: `8080`.
+- `--debug`: Log prefill/generate token counts and speeds (tokens/s) to stderr for each request.
 
 ## API
 
