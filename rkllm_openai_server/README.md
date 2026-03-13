@@ -46,6 +46,9 @@ Options:
 - `--platform`: One of `rk3588`, `rk3576`, `rv1126b`, `rk3562`. Default: `rk3588`.
 - `--host`: Bind address. Default: `0.0.0.0`.
 - `--port`: Port. Default: `8080`.
+- `--max_context_len`: Maximum context length (tokens). Default: `4096`. Lower values reduce KV cache memory and can improve prefill/generate speed on constrained devices.
+- `--max_new_tokens`: Maximum new tokens per response. Default: `4096`. Lower if you don't need long replies.
+- `--prompt_cache`: Path to a pre-built prompt cache file. If set, the runtime loads it after init to skip re-prefill for the cached prefix (faster first token when using the same system/template).
 - `--debug`: Log prefill/generate token counts and speeds (tokens/s) to stderr for each request.
 
 ## API
@@ -97,6 +100,13 @@ You can use the existing `examples/rkllm_server_demo/chat_api_flask.py` by chang
 ## Concurrency
 
 Only one inference runs at a time (same as the Flask demo). Concurrent requests to `/v1/chat/completions` will receive 503 when the server is busy.
+
+## Memory and speed optimization
+
+- **Context and generation length**: Use `--max_context_len` and `--max_new_tokens` to match your workload. Smaller values reduce KV cache allocation and often improve both prefill and decode speed on memory-limited boards (e.g. RK3588).
+- **Prompt cache**: For repeated system prompts or fixed prefixes, build a prompt cache once (e.g. with the C++ demo or a one-off run that saves cache via RKLLM API) and pass it with `--prompt_cache <path>`. The server will load it at startup and skip re-prefill for the cached prefix, improving time-to-first-token.
+- **Streaming**: The server uses a condition-variable wait (no fixed 50 ms polling) so streamed chunks are delivered as soon as the runtime produces them, improving perceived latency.
+- **Runtime settings**: The backend already sets `embed_flash = 1` (embeddings from flash) and `keep_history = 0` (no cross-request KV reuse), which keeps memory use and behavior predictable. Further tuning (e.g. `n_batch`, CPU affinity) is available in the RKLLM API if you extend the server.
 
 ## Troubleshooting
 

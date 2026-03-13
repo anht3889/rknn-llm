@@ -35,7 +35,8 @@ public:
               int max_context_len = 4096,
               int max_new_tokens = 4096,
               float temperature = 0.8f,
-              float top_p = 0.9f);
+              float top_p = 0.9f,
+              const std::string& prompt_cache_path = {});
 
     bool is_busy() const;
     RunResult run(const std::string& prompt,

@@ -13,6 +13,9 @@ int main(int argc, char* argv[]) {
     std::string host = "0.0.0.0";
     int port = 8080;
     bool debug = false;
+    int max_context_len = 4096;
+    int max_new_tokens = 4096;
+    std::string prompt_cache_path;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--model_path") == 0 && i + 1 < argc) {
@@ -23,11 +26,18 @@ int main(int argc, char* argv[]) {
             host = argv[++i];
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--max_context_len") == 0 && i + 1 < argc) {
+            max_context_len = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--max_new_tokens") == 0 && i + 1 < argc) {
+            max_new_tokens = std::stoi(argv[++i]);
+        } else if (strcmp(argv[i], "--prompt_cache") == 0 && i + 1 < argc) {
+            prompt_cache_path = argv[++i];
         } else if (strcmp(argv[i], "--debug") == 0) {
             debug = true;
         } else if (strcmp(argv[i], "--help") == 0) {
             std::cerr << "Usage: " << argv[0]
-                      << " --model_path <path> [--platform rk3588|rk3576] [--host 0.0.0.0] [--port 8080] [--debug]\n";
+                      << " --model_path <path> [--platform rk3588|rk3576] [--host 0.0.0.0] [--port 8080]\n"
+                      << "       [--max_context_len 4096] [--max_new_tokens 4096] [--prompt_cache <path>] [--debug]\n";
             return 0;
         }
     }
@@ -38,7 +48,7 @@ int main(int argc, char* argv[]) {
     }
 
     rkllm_openai::RKLLMBackend backend;
-    if (!backend.init(model_path, platform)) {
+    if (!backend.init(model_path, platform, max_context_len, max_new_tokens, 0.8f, 0.9f, prompt_cache_path)) {
         std::cerr << "Error: RKLLM init failed.\n";
         return 1;
     }

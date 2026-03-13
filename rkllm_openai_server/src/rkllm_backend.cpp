@@ -48,7 +48,8 @@ bool RKLLMBackend::init(const std::string& model_path,
                         int max_context_len,
                         int max_new_tokens,
                         float temperature,
-                        float top_p) {
+                        float top_p,
+                        const std::string& prompt_cache_path) {
     model_path_ = model_path;
     platform_ = platform;
 
@@ -68,7 +69,11 @@ bool RKLLMBackend::init(const std::string& model_path,
     param.extend_param.embed_flash = 1;
 
     int ret = rkllm_init(&handle_, &param, static_callback);
-    return ret == 0;
+    if (ret != 0)
+        return false;
+    if (!prompt_cache_path.empty() && rkllm_load_prompt_cache(handle_, prompt_cache_path.c_str()) != 0)
+        return false;
+    return true;
 }
 
 RKLLMBackend::~RKLLMBackend() {
@@ -161,10 +166,9 @@ RunResult RKLLMBackend::run(const std::string& prompt,
         std::string chunk;
         {
             std::unique_lock<std::mutex> lock(run_mutex_);
-            stream_cv_.wait_for(lock, std::chrono::milliseconds(50),
-                                [this]() { return run_finished_.load() || !stream_queue_.empty(); });
+            stream_cv_.wait(lock, [this]() { return run_finished_.load() || !stream_queue_.empty(); });
             if (!stream_queue_.empty()) {
-                chunk = stream_queue_.front();
+                chunk = std::move(stream_queue_.front());
                 stream_queue_.pop();
             }
         }
