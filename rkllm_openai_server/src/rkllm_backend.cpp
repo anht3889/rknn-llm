@@ -174,10 +174,14 @@ RunResult RKLLMBackend::run(const std::string& prompt,
         return out;
     }
 
-    std::thread th([this, rkllm_input, rkllm_infer_params]() {
-        rkllm_run(handle_, const_cast<RKLLMInput*>(&rkllm_input),
-                  const_cast<RKLLMInferParam*>(&rkllm_infer_params), this);
-    });
+    /* Use run_async so the runtime drives the callback from its thread; avoid running
+     * rkllm_run from a worker thread which can hang (runtime may expect callbacks on same
+     * thread or have other thread affinity). */
+    int ret = rkllm_run_async(handle_, &rkllm_input, &rkllm_infer_params, this);
+    if (ret != 0) {
+        out.error = true;
+        return out;
+    }
 
     while (!run_finished_.load() || !stream_queue_.empty()) {
         std::string chunk;
@@ -192,7 +196,6 @@ RunResult RKLLMBackend::run(const std::string& prompt,
         if (!chunk.empty() && on_stream_chunk)
             on_stream_chunk(chunk);
     }
-    if (th.joinable()) th.join();
 
     out.prefill_tokens = prefill_tokens_;
     out.completion_tokens = completion_tokens_;
