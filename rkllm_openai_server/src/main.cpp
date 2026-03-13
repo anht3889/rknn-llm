@@ -10,6 +10,7 @@
 #if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
 #include "image_encoder.hpp"
 #endif
+#include <exception>
 #include <iostream>
 #include <fstream>
 #include <memory>
@@ -222,25 +223,44 @@ int main(int argc, char* argv[]) {
 
     svr.Post("/v1/audio/speech", [&tts_handler](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
-        auto [audio, content_type] = tts_handler.handle_speech(req.body);
-        if (content_type.empty()) {
-            res.set_header("Content-Type", "application/json");
-            std::string body_str(audio.begin(), audio.end());
-            try {
-                auto err = nlohmann::json::parse(body_str);
-                if (err.contains("error") && err["error"].contains("type") && err["error"]["type"] == "server_error")
-                    res.status = 500;
-                else
-                    res.status = 400;
-                if (err.contains("error") && err["error"].contains("message"))
-                    std::cerr << "[TTS] " << err["error"]["message"].get<std::string>() << std::endl;
-            } catch (...) {
+        try {
+            auto [audio, content_type] = tts_handler.handle_speech(req.body);
+            if (content_type.empty()) {
                 res.status = 500;
+                res.set_header("Content-Type", "application/json");
+                std::string body_str(audio.begin(), audio.end());
+                if (body_str.empty()) {
+                    body_str = "{\"error\":{\"message\":\"TTS failed (no details)\",\"type\":\"server_error\"}}";
+                    std::cerr << "[TTS] handle_speech returned empty error body.\n";
+                } else {
+                    try {
+                        auto err = nlohmann::json::parse(body_str);
+                        if (err.contains("error") && err["error"].contains("type") && err["error"]["type"] != "server_error")
+                            res.status = 400;
+                        if (err.contains("error") && err["error"].contains("message"))
+                            std::cerr << "[TTS] " << err["error"]["message"].get<std::string>() << std::endl;
+                    } catch (...) {
+                        std::cerr << "[TTS] Error body is not JSON: " << body_str.substr(0, 200) << std::endl;
+                    }
+                }
+                res.set_content(body_str, "application/json");
+            } else {
+                res.set_header("Content-Type", content_type);
+                res.set_content(std::string(audio.begin(), audio.end()), content_type);
             }
-            res.set_content(body_str, "application/json");
-        } else {
-            res.set_header("Content-Type", content_type);
-            res.set_content(std::string(audio.begin(), audio.end()), content_type);
+        } catch (const std::exception& e) {
+            res.status = 500;
+            res.set_header("Content-Type", "application/json");
+            std::string msg = e.what();
+            std::cerr << "[TTS] Exception: " << msg << std::endl;
+            nlohmann::json err;
+            err["error"] = {{"message", "TTS exception: " + msg}, {"type", "server_error"}};
+            res.set_content(err.dump(), "application/json");
+        } catch (...) {
+            res.status = 500;
+            res.set_header("Content-Type", "application/json");
+            std::cerr << "[TTS] Unknown exception.\n";
+            res.set_content("{\"error\":{\"message\":\"TTS unknown exception\",\"type\":\"server_error\"}}", "application/json");
         }
     });
 
