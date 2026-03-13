@@ -57,7 +57,7 @@ bool PiperDecoder::init(const std::string& rknn_path) {
 
 void PiperDecoder::release() {
     if (ctx_) {
-        rknn_destroy(reinterpret_cast<rknn_context>(static_cast<uintptr_t>(ctx_)));
+        rknn_destroy(reinterpret_cast<rknn_context>(reinterpret_cast<uintptr_t>(ctx_)));
         ctx_ = nullptr;
     }
     chunk_time_ = 0;
@@ -66,7 +66,7 @@ void PiperDecoder::release() {
 }
 
 bool PiperDecoder::run_chunk(const float* z, const float* y_mask, std::vector<float>& out_audio) {
-    rknn_context ctx = reinterpret_cast<rknn_context>(static_cast<uintptr_t>(ctx_));
+    rknn_context ctx = reinterpret_cast<rknn_context>(reinterpret_cast<uintptr_t>(ctx_));
     if (!ctx || !z || !y_mask) return false;
 
     size_t z_size = 1 * z_channels_ * chunk_time_ * sizeof(float);
