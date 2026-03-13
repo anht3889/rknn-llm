@@ -85,14 +85,7 @@ std::string ChatHandler::handle_chat_completions(const std::string& body, void* 
     }
 
     if (stream && response) {
-        /* Streaming path: parse same as non-stream, then run_streaming_start + chunked SSE. */
-        json parse_result = parse_messages_and_run(data);
-        if (parse_result.contains("error"))
-            return parse_result.dump();
-
-        /* We need to run streaming: parse_messages_and_run already ran backend_->run() once.
-         * So we need a variant that only parses and returns (prompt, role, ...) without running.
-         * For simplicity we add a dedicated streaming flow that re-parses. */
+        /* Streaming path: parse messages only (do not run full inference), then run_streaming_start + chunked SSE. */
         const json& messages = data["messages"];
         bool enable_thinking = data.value("enable_thinking", false);
         std::string model_id = data.value("model", "rkllm");
@@ -161,7 +154,17 @@ std::string ChatHandler::handle_chat_completions(const std::string& body, void* 
         response->set_header("Access-Control-Allow-Origin", "*");
         response->set_chunked_content_provider(
             "text/event-stream",
-            [this, backend = backend_, model_id, created, id](size_t /*offset*/, httplib::DataSink& sink) -> bool {
+            [this, backend = backend_, model_id, created, id](size_t offset, httplib::DataSink& sink) -> bool {
+                /* Send an initial empty-delta chunk so the client gets a response immediately. */
+                if (offset == 0) {
+                    json init_delta = json::object();
+                    json init_choice = {{"index", 0}, {"delta", std::move(init_delta)}, {"finish_reason", nullptr}};
+                    json init_line = {{"id", id}, {"object", "chat.completion.chunk"}, {"created", created},
+                                     {"model", model_id}, {"choices", json::array({init_choice})}};
+                    std::string init_str = "data: " + init_line.dump() + "\n\n";
+                    if (!sink.write(init_str.data(), init_str.size())) return false;
+                    return true;
+                }
                 std::string chunk;
                 RunResult final_result;
                 if (backend->pop_stream_chunk(chunk, final_result)) {
