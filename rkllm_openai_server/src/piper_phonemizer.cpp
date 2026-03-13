@@ -67,7 +67,8 @@ bool PiperPhonemizer::phonemize(const PiperConfig& config, const std::string& te
 #else
     int phoneme_flags = espeakPHONEMES_IPA;
 #endif
-    const char* phonemes = espeak_TextToPhonemes(const_cast<void*>(static_cast<const void*>(text.c_str())), static_cast<unsigned int>(text.size() + 1), phoneme_flags);
+    const char* text_ptr = text.c_str();
+    const char* phonemes = espeak_TextToPhonemes(reinterpret_cast<const void**>(&text_ptr), 0, phoneme_flags);
     if (!phonemes) return false;
 
     std::string phoneme_str(phonemes);
