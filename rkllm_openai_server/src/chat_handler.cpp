@@ -80,12 +80,7 @@ json ChatHandler::parse_messages_and_run(const json& data,
         return err;
     }
 
-    if (backend_->is_busy()) {
-        json err;
-        err["error"] = {{"message", "Server is busy"}, {"type", "server_error"}};
-        err["status"] = 503;
-        return err;
-    }
+    /* Serialization is done inside backend->run() (one inference at a time). */
 
     const std::string* tools_ptr = tools_json.empty() ? nullptr : &tools_json;
     const std::string* sys_ptr = system_prompt.empty() ? nullptr : &system_prompt;

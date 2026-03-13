@@ -51,6 +51,7 @@ private:
     std::string model_path_;
     std::string platform_;
 
+    std::mutex serialize_mutex_;  /* one inference at a time */
     mutable std::mutex run_mutex_;
     std::queue<std::string> stream_queue_;
     std::condition_variable stream_cv_;

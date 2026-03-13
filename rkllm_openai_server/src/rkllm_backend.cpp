@@ -96,6 +96,8 @@ RunResult RKLLMBackend::run(const std::string& prompt,
         return out;
     }
 
+    std::lock_guard<std::mutex> serial_lock(serialize_mutex_);
+
     {
         std::lock_guard<std::mutex> lock(run_mutex_);
         while (!stream_queue_.empty()) stream_queue_.pop();
