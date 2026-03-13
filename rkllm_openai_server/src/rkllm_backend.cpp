@@ -1,7 +1,7 @@
 #include "rkllm_backend.hpp"
 #include "rkllm.h"
 #include <cstring>
-#include <thread>
+#include <vector>
 
 namespace rkllm_openai {
 
@@ -155,53 +155,35 @@ RunResult RKLLMBackend::run(const std::string& prompt,
     rkllm_infer_params.lora_params = nullptr;
     rkllm_infer_params.prompt_cache_params = nullptr;
 
-    if (!stream) {
-        int ret = rkllm_run(handle_, &rkllm_input, &rkllm_infer_params, this);
-        std::string accumulated;
-        {
-            std::lock_guard<std::mutex> lock(run_mutex_);
-            while (!stream_queue_.empty()) {
-                accumulated += stream_queue_.front();
-                stream_queue_.pop();
-            }
+    /* Always run synchronously. The runtime calls our callback during rkllm_run and we
+     * push chunks to the queue. After run() returns we drain and (if stream) replay to
+     * on_stream_chunk so the client gets NDJSON lines. */
+    int ret = rkllm_run(handle_, &rkllm_input, &rkllm_infer_params, this);
+
+    std::vector<std::string> chunks;
+    {
+        std::lock_guard<std::mutex> lock(run_mutex_);
+        while (!stream_queue_.empty()) {
+            chunks.push_back(std::move(stream_queue_.front()));
+            stream_queue_.pop();
         }
+    }
+    std::string accumulated;
+    for (const auto& c : chunks)
+        accumulated += c;
+    if (stream && on_stream_chunk) {
+        for (const auto& c : chunks)
+            if (!c.empty()) on_stream_chunk(c);
+    }
+
+    if (!stream)
         out.content = accumulated;
-        out.prefill_tokens = prefill_tokens_;
-        out.completion_tokens = completion_tokens_;
-        out.prefill_time_ms = prefill_time_ms_;
-        out.generate_time_ms = generate_time_ms_;
-        out.error = (ret != 0 || call_state_.load() == static_cast<int>(RKLLM_RUN_ERROR));
-        return out;
-    }
-
-    /* Use run_async so the runtime drives the callback from its thread; avoid running
-     * rkllm_run from a worker thread which can hang (runtime may expect callbacks on same
-     * thread or have other thread affinity). */
-    int ret = rkllm_run_async(handle_, &rkllm_input, &rkllm_infer_params, this);
-    if (ret != 0) {
-        out.error = true;
-        return out;
-    }
-
-    while (!run_finished_.load() || !stream_queue_.empty()) {
-        std::string chunk;
-        {
-            std::unique_lock<std::mutex> lock(run_mutex_);
-            stream_cv_.wait(lock, [this]() { return run_finished_.load() || !stream_queue_.empty(); });
-            if (!stream_queue_.empty()) {
-                chunk = std::move(stream_queue_.front());
-                stream_queue_.pop();
-            }
-        }
-        if (!chunk.empty() && on_stream_chunk)
-            on_stream_chunk(chunk);
-    }
 
     out.prefill_tokens = prefill_tokens_;
     out.completion_tokens = completion_tokens_;
     out.prefill_time_ms = prefill_time_ms_;
     out.generate_time_ms = generate_time_ms_;
-    out.error = (call_state_.load() == static_cast<int>(RKLLM_RUN_ERROR));
+    out.error = (ret != 0 || call_state_.load() == static_cast<int>(RKLLM_RUN_ERROR));
     return out;
 }
 
