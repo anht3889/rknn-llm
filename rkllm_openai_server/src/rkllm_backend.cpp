@@ -8,15 +8,17 @@ namespace rkllm_openai {
 int RKLLMBackend::static_callback(RKLLMResult* result, void* userdata, LLMCallState state) {
     auto* self = static_cast<RKLLMBackend*>(userdata);
     if (!self) return 0;
-    if (result && result->text)
-        self->push_chunk(result->text);
-    if (state == RKLLM_RUN_FINISH || state == RKLLM_RUN_ERROR) {
-        int prefill = 0, completion = 0;
-        if (result && state == RKLLM_RUN_FINISH) {
-            prefill = result->perf.prefill_tokens;
-            completion = result->perf.generate_tokens;
+    if (result) {
+        if (result->text)
+            self->push_chunk(result->text);
+        if (state == RKLLM_RUN_FINISH || state == RKLLM_RUN_ERROR) {
+            int prefill = 0, completion = 0;
+            if (state == RKLLM_RUN_FINISH) {
+                prefill = result->perf.prefill_tokens;
+                completion = result->perf.generate_tokens;
+            }
+            self->set_finished(static_cast<int>(state), prefill, completion);
         }
-        self->set_finished(static_cast<int>(state), prefill, completion);
     }
     return 0;
 }
@@ -46,6 +48,8 @@ bool RKLLMBackend::init(const std::string& model_path,
     platform_ = platform;
 
     RKLLMParam param = rkllm_createDefaultParam();
+    std::memset(&param.extend_param, 0, sizeof(param.extend_param));
+
     param.model_path = model_path_.c_str();
     param.max_context_len = max_context_len;
     param.max_new_tokens = max_new_tokens;

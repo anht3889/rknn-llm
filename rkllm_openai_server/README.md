@@ -96,3 +96,19 @@ You can use the existing `examples/rkllm_server_demo/chat_api_flask.py` by chang
 ## Concurrency
 
 Only one inference runs at a time (same as the Flask demo). Concurrent requests to `/v1/chat/completions` will receive 503 when the server is busy.
+
+## Troubleshooting
+
+**Segmentation fault at startup**
+
+1. Get a backtrace to see where it crashes:
+   ```bash
+   gdb --args ./rkllm_openai_server --model_path /path/to/model.rkllm --platform rk3588
+   run
+   # after crash:
+   bt
+   quit
+   ```
+2. Ensure `librkllmrt.so` is the correct build for your board and is findable (`LD_LIBRARY_PATH` or same directory as the binary).
+3. Confirm the model path is a valid `.rkllm` file and the process has read access.
+4. Try running the C++ demo first to confirm the runtime works: `examples/rkllm_api_demo/deploy`.
