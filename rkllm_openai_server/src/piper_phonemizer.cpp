@@ -1,6 +1,5 @@
 #include "piper_phonemizer.hpp"
 #include <cstring>
-#include <sstream>
 
 #if defined(RKLLM_OPENAI_ENABLE_TTS) && defined(RKLLM_OPENAI_TTS_USE_ESPEAK)
 extern "C" {
@@ -35,24 +34,45 @@ static int next_utf8(const char* p, size_t len, std::string& out_cp) {
     return n;
 }
 
-/** Map phoneme string to IDs: split by | then each token by UTF-8 codepoint, lookup in config. */
+/** Map phoneme string to IDs: split by whitespace and |; for each token try whole-token lookup, else UTF-8 codepoints. */
 static void phoneme_string_to_ids(const PiperConfig& config, const std::string& phoneme_str, std::vector<int64_t>& out_ids) {
     int64_t bos = config.get_phoneme_id("^");
     int64_t eos = config.get_phoneme_id("$");
+    int64_t space_id = config.get_phoneme_id(" ");
     if (bos >= 0) out_ids.push_back(bos);
 
-    std::istringstream iss(phoneme_str);
+    auto add_symbol = [&](const std::string& sym) {
+        if (sym.empty()) return;
+        int64_t id = config.get_phoneme_id(sym);
+        if (id >= 0) out_ids.push_back(id);
+        else {
+            for (size_t i = 0; i < sym.size(); ) {
+                std::string cp;
+                int n = next_utf8(sym.c_str() + i, sym.size() - i, cp);
+                if (n <= 0) break;
+                int64_t cid = config.get_phoneme_id(cp);
+                if (cid >= 0) out_ids.push_back(cid);
+                i += static_cast<size_t>(n);
+            }
+        }
+    };
+
     std::string token;
-    while (std::getline(iss, token, '|')) {
-        for (size_t i = 0; i < token.size(); ) {
-            std::string sym;
-            int n = next_utf8(token.c_str() + i, token.size() - i, sym);
-            if (n <= 0) break;
-            int64_t id = config.get_phoneme_id(sym);
-            if (id >= 0) out_ids.push_back(id);
-            i += static_cast<size_t>(n);
+    for (size_t i = 0; i <= phoneme_str.size(); ++i) {
+        char c = (i < phoneme_str.size()) ? phoneme_str[i] : ' ';
+        if (c == ' ' || c == '\t' || c == '\n' || c == '|' || c == '\r') {
+            if (!token.empty()) {
+                add_symbol(token);
+                token.clear();
+            }
+            if ((c == ' ' || c == '\t' || c == '\n' || c == '\r') && space_id >= 0)
+                out_ids.push_back(space_id);
+        } else {
+            token += c;
         }
     }
+    if (!token.empty())
+        add_symbol(token);
 
     if (eos >= 0) out_ids.push_back(eos);
 }

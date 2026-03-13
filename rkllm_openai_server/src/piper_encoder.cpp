@@ -92,12 +92,40 @@ bool PiperEncoder::run(const int64_t* phoneme_ids, size_t num_phonemes,
     std::vector<const char*> run_output_names = {out0_name.get(), out1_name.get()};
     auto output_tensors = sess->Run(Ort::RunOptions{nullptr}, input_names.data(), input_tensors.data(), input_tensors.size(), run_output_names.data(), 2);
 
-    auto& z_tensor = output_tensors[0];
-    auto& y_mask_tensor = output_tensors[1];
-    auto z_shape = z_tensor.GetTensorTypeAndShapeInfo().GetShape();
-    auto y_shape = y_mask_tensor.GetTensorTypeAndShapeInfo().GetShape();
-    float* z_data = z_tensor.GetTensorMutableData<float>();
-    float* y_data = y_mask_tensor.GetTensorMutableData<float>();
+    auto& t0 = output_tensors[0];
+    auto& t1 = output_tensors[1];
+    auto s0 = t0.GetTensorTypeAndShapeInfo().GetShape();
+    auto s1 = t1.GetTensorTypeAndShapeInfo().GetShape();
+    float* d0 = t0.GetTensorMutableData<float>();
+    float* d1 = t1.GetTensorMutableData<float>();
+    size_t n0 = 1;
+    for (auto d : s0) n0 *= static_cast<size_t>(d);
+    size_t n1 = 1;
+    for (auto d : s1) n1 *= static_cast<size_t>(d);
+
+    // Identify z (1, C, T with C>1) vs y_mask (1, 1, T) by shape; model output order may vary
+    Ort::Value const* z_tensor_ptr = nullptr;
+    Ort::Value const* y_mask_tensor_ptr = nullptr;
+    if (s0.size() >= 3 && s1.size() >= 3) {
+        size_t c0 = static_cast<size_t>(s0[1]);
+        size_t c1 = static_cast<size_t>(s1[1]);
+        if (c0 > 1 && c1 == 1) {
+            z_tensor_ptr = &t0;
+            y_mask_tensor_ptr = &t1;
+        } else if (c1 > 1 && c0 == 1) {
+            z_tensor_ptr = &t1;
+            y_mask_tensor_ptr = &t0;
+        }
+    }
+    if (!z_tensor_ptr || !y_mask_tensor_ptr) {
+        // Fallback: assume first output is z, second is y_mask
+        z_tensor_ptr = &t0;
+        y_mask_tensor_ptr = &t1;
+    }
+    auto z_shape = z_tensor_ptr->GetTensorTypeAndShapeInfo().GetShape();
+    auto y_shape = y_mask_tensor_ptr->GetTensorTypeAndShapeInfo().GetShape();
+    const float* z_data = z_tensor_ptr->GetTensorData<float>();
+    const float* y_data = y_mask_tensor_ptr->GetTensorData<float>();
     size_t z_elems = 1;
     for (auto d : z_shape) z_elems *= static_cast<size_t>(d);
     size_t y_elems = 1;
