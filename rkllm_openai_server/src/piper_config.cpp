@@ -13,7 +13,7 @@ static void load_phoneme_id_map(const json& j, std::unordered_map<std::string, i
     out.clear();
     if (!j.is_object()) return;
     for (auto it = j.begin(); it != j.end(); ++it) {
-        std::string key = it.key().get<std::string>();
+        std::string key = it.key();
         const auto& v = it.value();
         int64_t id = -1;
         if (v.is_array() && !v.empty() && v[0].is_number_integer())
@@ -29,7 +29,7 @@ static void load_speaker_id_map(const json& j, std::unordered_map<std::string, i
     out.clear();
     if (!j.is_object()) return;
     for (auto it = j.begin(); it != j.end(); ++it) {
-        std::string key = it.key().get<std::string>();
+        std::string key = it.key();
         const auto& v = it.value();
         if (v.is_number_integer())
             out[key] = v.get<int64_t>();

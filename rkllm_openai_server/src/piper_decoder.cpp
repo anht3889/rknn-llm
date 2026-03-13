@@ -2,6 +2,7 @@
 
 #if defined(RKLLM_OPENAI_ENABLE_TTS) && defined(RKLLM_OPENAI_TTS_USE_RKNN)
 #include "rknn_api.h"
+#include <cstdint>
 #include <cstring>
 #endif
 
@@ -16,7 +17,7 @@ PiperDecoder::~PiperDecoder() {
 bool PiperDecoder::init(const std::string& rknn_path) {
     if (ctx_) return true;
     rknn_context ctx = 0;
-    int ret = rknn_init(&ctx, rknn_path.c_str(), 0, 0, nullptr);
+    int ret = rknn_init(&ctx, const_cast<char*>(rknn_path.c_str()), 0, 0, nullptr);
     if (ret != 0) return false;
 
     rknn_input_output_num io_num;
@@ -50,13 +51,13 @@ bool PiperDecoder::init(const std::string& rknn_path) {
     for (int i = 0; i < out_attr.n_dims; i++)
         if (out_attr.dims[i] > 1) out_samples_ *= static_cast<size_t>(out_attr.dims[i]);
 
-    ctx_ = static_cast<void*>(ctx);
+    ctx_ = reinterpret_cast<void*>(static_cast<uintptr_t>(ctx));
     return true;
 }
 
 void PiperDecoder::release() {
     if (ctx_) {
-        rknn_destroy(static_cast<rknn_context>(ctx_));
+        rknn_destroy(reinterpret_cast<rknn_context>(static_cast<uintptr_t>(ctx_)));
         ctx_ = nullptr;
     }
     chunk_time_ = 0;
@@ -65,7 +66,7 @@ void PiperDecoder::release() {
 }
 
 bool PiperDecoder::run_chunk(const float* z, const float* y_mask, std::vector<float>& out_audio) {
-    rknn_context ctx = static_cast<rknn_context>(ctx_);
+    rknn_context ctx = reinterpret_cast<rknn_context>(static_cast<uintptr_t>(ctx_));
     if (!ctx || !z || !y_mask) return false;
 
     size_t z_size = 1 * z_channels_ * chunk_time_ * sizeof(float);
