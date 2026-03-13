@@ -13,6 +13,15 @@
 
 namespace rkllm_openai {
 
+/** Optional multimodal input (image embeddings). When non-null in run(), use RKLLM_INPUT_MULTIMODAL. */
+struct MultimodalInput {
+    const float* image_embed = nullptr;
+    size_t n_image_tokens = 0;
+    size_t n_image = 0;
+    size_t image_width = 0;
+    size_t image_height = 0;
+};
+
 struct RunResult {
     std::string content;
     int prefill_tokens = 0;
@@ -36,7 +45,10 @@ public:
               int max_new_tokens = 4096,
               float temperature = 0.8f,
               float top_p = 0.9f,
-              const std::string& prompt_cache_path = {});
+              const std::string& prompt_cache_path = {},
+              const std::string& img_start = {},
+              const std::string& img_end = {},
+              const std::string& img_content = {});
 
     bool is_busy() const;
     RunResult run(const std::string& prompt,
@@ -45,7 +57,8 @@ public:
                  const std::string* tools_json,
                  const std::string* system_prompt,
                  bool stream,
-                 std::function<void(const std::string&)> on_stream_chunk);
+                 std::function<void(const std::string&)> on_stream_chunk,
+                 const MultimodalInput* multimodal = nullptr);
 
     void abort();
 

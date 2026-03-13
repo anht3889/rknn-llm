@@ -1,4 +1,5 @@
 #include "chat_handler.hpp"
+#include "base64.hpp"
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <chrono>
@@ -9,7 +10,8 @@ namespace rkllm_openai {
 
 using json = nlohmann::json;
 
-ChatHandler::ChatHandler(RKLLMBackend* backend, bool debug) : backend_(backend), debug_(debug) {}
+ChatHandler::ChatHandler(RKLLMBackend* backend, bool debug, EncodeImageFn encode_image)
+    : backend_(backend), debug_(debug), encode_image_(std::move(encode_image)) {}
 
 void ChatHandler::log_debug_stats(const RunResult& r) const {
     if (!debug_) return;
@@ -53,6 +55,39 @@ std::string ChatHandler::handle_chat_completions(const std::string& body,
     return result.dump();
 }
 
+/* Parse OpenAI-style content: string or array of { type: "text"|"image_url", text?: string, image_url?: { url: "data:image/...;base64,..." } }. */
+static void parse_content(const json& content, std::string& prompt_out, std::vector<std::vector<uint8_t>>& images_out) {
+    prompt_out.clear();
+    images_out.clear();
+    if (content.is_string()) {
+        prompt_out = content.get<std::string>();
+        return;
+    }
+    if (!content.is_array())
+        return;
+    for (const auto& part : content) {
+        if (!part.is_object() || !part.contains("type"))
+            continue;
+        std::string type = part["type"].get<std::string>();
+        if (type == "text" && part.contains("text") && part["text"].is_string()) {
+            prompt_out += part["text"].get<std::string>();
+        } else if (type == "image_url" && part.contains("image_url") && part["image_url"].is_object()) {
+            const auto& img = part["image_url"];
+            std::string url = img.contains("url") && img["url"].is_string() ? img["url"].get<std::string>() : "";
+            /* data:image/jpeg;base64,<data> or data:image/png;base64,<data> */
+            const std::string prefix = "data:";
+            size_t comma = url.find(',');
+            if (url.size() > prefix.size() && url.compare(0, prefix.size(), prefix) == 0 && comma != std::string::npos) {
+                std::string b64 = url.substr(comma + 1);
+                std::vector<uint8_t> decoded = rkllm_openai::base64_decode(b64);
+                if (!decoded.empty())
+                    images_out.push_back(std::move(decoded));
+            }
+            prompt_out += "<image>";  /* placeholder; model uses img_start/img_end/img_content */
+        }
+    }
+}
+
 json ChatHandler::parse_messages_and_run(const json& data,
                                          bool stream,
                                          std::function<void(const std::string&)> stream_write) {
@@ -65,25 +100,28 @@ json ChatHandler::parse_messages_and_run(const json& data,
     std::string system_prompt;
     std::string prompt;
     std::string role = "user";
+    std::vector<std::vector<uint8_t>> last_images;
 
     for (const auto& msg : messages) {
         if (!msg.is_object() || !msg.contains("role") || !msg.contains("content"))
             continue;
         std::string r = msg["role"].get<std::string>();
-        std::string content = msg["content"].is_string() ? msg["content"].get<std::string>() : "";
         if (r == "system") {
-            system_prompt = content;
+            if (msg["content"].is_string())
+                system_prompt = msg["content"].get<std::string>();
             continue;
         }
         if (r == "assistant")
             continue;
         if (r == "user") {
-            prompt = content;
+            parse_content(msg["content"], prompt, last_images);
             role = "user";
             continue;
         }
         if (r == "tool") {
-            prompt = content;
+            if (msg["content"].is_string())
+                prompt = msg["content"].get<std::string>();
+            last_images.clear();
             role = "tool";
             continue;
         }
@@ -95,6 +133,22 @@ json ChatHandler::parse_messages_and_run(const json& data,
         return err;
     }
 
+    std::optional<MultimodalInputResult> multimodal_result;
+    if (!last_images.empty()) {
+        if (!encode_image_) {
+            json err;
+            err["error"] = {{"message", "Multimodal (image) not configured. Start server with --encoder_model_path and a vision LLM (--img_start/--img_end/--img_content)."}, {"type", "invalid_request_error"}};
+            return err;
+        }
+        /* Use first image only (RKLLM multimodal demo uses n_image=1). */
+        multimodal_result = encode_image_(last_images[0]);
+        if (!multimodal_result) {
+            json err;
+            err["error"] = {{"message", "Image encoding failed."}, {"type", "server_error"}};
+            return err;
+        }
+    }
+
     /* Serialization is done inside backend->run() (one inference at a time). */
 
     const std::string* tools_ptr = tools_json.empty() ? nullptr : &tools_json;
@@ -104,8 +158,10 @@ json ChatHandler::parse_messages_and_run(const json& data,
     int64_t created = std::chrono::duration_cast<std::chrono::seconds>(now).count();
     std::string id = "chatcmpl-" + std::to_string(created);
 
+    const MultimodalInput* multimodal_ptr = multimodal_result ? &multimodal_result->second : nullptr;
+
     if (!stream) {
-        RunResult run_result = backend_->run(prompt, role, enable_thinking, tools_ptr, sys_ptr, false, nullptr);
+        RunResult run_result = backend_->run(prompt, role, enable_thinking, tools_ptr, sys_ptr, false, nullptr, multimodal_ptr);
         if (debug_) log_debug_stats(run_result);
         if (run_result.error) {
             json err;
@@ -146,7 +202,7 @@ json ChatHandler::parse_messages_and_run(const json& data,
             });
             if (stream_write)
                 stream_write(chunk_obj.dump() + "\n");
-        });
+        }, multimodal_ptr);
     if (debug_) log_debug_stats(run_result);
 
     json finish_obj;

@@ -54,6 +54,35 @@ Options:
 - `--no-fix-freq`: Skip applying fix_freq (do not lock NPU/CPU/GPU/DDR to max frequency). By default, the server applies the same fix as `scripts/fix_freq_<platform>.sh` using the detected or given platform; this requires root (e.g. run with `sudo`).
 - `--debug`: Log prefill/generate token counts and speeds (tokens/s) to stderr for each request.
 
+When built with **multimodal** support (`-DENABLE_MULTIMODAL=ON`, see below):
+
+- `--encoder_model_path`: Path to the RKNN vision encoder model (e.g. from `examples/multimodal_model_demo`). Enables image input in chat completions.
+- `--img_start`, `--img_end`, `--img_content`: Vision prompt tokens for the LLM (default `<|vision_start|>`, `<|vision_end|>`, `<|image_pad|>` when encoder is set).
+- `--encoder_core_num`: NPU core count for the encoder (default `1`).
+
+## Multimodal (vision) build
+
+To support image inputs (like `examples/multimodal_model_demo`), build with OpenCV, RKNN runtime, and the demo’s image encoder:
+
+```bash
+cd rkllm_openai_server/build
+cmake -DCMAKE_SYSTEM_NAME=Linux -DENABLE_MULTIMODAL=ON ..
+make
+```
+
+Requirements for `ENABLE_MULTIMODAL=ON`:
+
+- The repo must contain `examples/multimodal_model_demo/deploy` (with `src/image_enc.cc` and `3rdparty/librknnrt`, `3rdparty/opencv`).
+- Run on the board with the encoder RKNN model and a vision-capable RKLLM model (e.g. Qwen2-VL, InternVL).
+
+Run with an encoder and vision model:
+
+```bash
+./rkllm_openai_server --model_path /path/to/vision_llm.rkllm --encoder_model_path /path/to/encoder.rknn
+```
+
+Then send a message with image content (see API below).
+
 ## API
 
 ### GET /v1/models
@@ -71,7 +100,7 @@ curl http://localhost:8080/v1/models
 Request body (JSON):
 
 - `model` (optional): Echoed in the response; no effect on inference.
-- `messages`: Array of `{ "role": "user"|"system"|"assistant"|"tool", "content": "..." }`. The last `user` or `tool` message is used as the prompt; `system` is used as system prompt (e.g. for function tools).
+- `messages`: Array of `{ "role": "user"|"system"|"assistant"|"tool", "content": "..." }`. The last `user` or `tool` message is used as the prompt; `system` is used as system prompt (e.g. for function tools). For **multimodal** (when the server is started with `--encoder_model_path`), `content` may be an array of parts: `{ "type": "text", "text": "..." }` and `{ "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,..." } }`. Text and image parts are combined; the image is encoded by the vision encoder and sent to the LLM with the text (one image per request).
 - `stream` (optional): `true` for newline-delimited JSON stream; `false` or omit for a single JSON response.
 - `enable_thinking` (optional): Enable thinking mode (e.g. Qwen3).
 - `tools` (optional): JSON array of tool definitions for function calling (same format as OpenAI tools).

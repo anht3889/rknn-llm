@@ -49,7 +49,10 @@ bool RKLLMBackend::init(const std::string& model_path,
                         int max_new_tokens,
                         float temperature,
                         float top_p,
-                        const std::string& prompt_cache_path) {
+                        const std::string& prompt_cache_path,
+                        const std::string& img_start,
+                        const std::string& img_end,
+                        const std::string& img_content) {
     model_path_ = model_path;
     platform_ = platform;
 
@@ -65,8 +68,11 @@ bool RKLLMBackend::init(const std::string& model_path,
     param.max_new_tokens = max_new_tokens;
     param.max_context_len = max_context_len;
     param.skip_special_token = true;
-    param.extend_param.base_domain_id = 0;
+    param.extend_param.base_domain_id = img_start.empty() ? 0 : 1;  /* 1 for multimodal (vision) */
     param.extend_param.embed_flash = 1;
+    if (!img_start.empty()) param.img_start = img_start.c_str();
+    if (!img_end.empty()) param.img_end = img_end.c_str();
+    if (!img_content.empty()) param.img_content = img_content.c_str();
 
     int ret = rkllm_init(&handle_, &param, static_callback);
     if (ret != 0)
@@ -99,7 +105,8 @@ RunResult RKLLMBackend::run(const std::string& prompt,
                            const std::string* tools_json,
                            const std::string* system_prompt,
                            bool stream,
-                           std::function<void(const std::string&)> on_stream_chunk) {
+                           std::function<void(const std::string&)> on_stream_chunk,
+                           const MultimodalInput* multimodal) {
     RunResult out;
     if (!handle_) {
         out.error = true;
@@ -128,8 +135,18 @@ RunResult RKLLMBackend::run(const std::string& prompt,
     std::memset(&rkllm_input, 0, sizeof(rkllm_input));
     rkllm_input.role = role.empty() ? "user" : role.c_str();
     rkllm_input.enable_thinking = enable_thinking;
-    rkllm_input.input_type = RKLLM_INPUT_PROMPT;
-    rkllm_input.prompt_input = prompt.c_str();
+    if (multimodal && multimodal->image_embed && multimodal->n_image_tokens > 0) {
+        rkllm_input.input_type = RKLLM_INPUT_MULTIMODAL;
+        rkllm_input.multimodal_input.prompt = const_cast<char*>(prompt.c_str());
+        rkllm_input.multimodal_input.image_embed = const_cast<float*>(multimodal->image_embed);
+        rkllm_input.multimodal_input.n_image_tokens = multimodal->n_image_tokens;
+        rkllm_input.multimodal_input.n_image = multimodal->n_image > 0 ? multimodal->n_image : 1;
+        rkllm_input.multimodal_input.image_width = multimodal->image_width;
+        rkllm_input.multimodal_input.image_height = multimodal->image_height;
+    } else {
+        rkllm_input.input_type = RKLLM_INPUT_PROMPT;
+        rkllm_input.prompt_input = prompt.c_str();
+    }
 
     RKLLMInferParam rkllm_infer_params;
     std::memset(&rkllm_infer_params, 0, sizeof(rkllm_infer_params));

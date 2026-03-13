@@ -2,8 +2,12 @@
 #include "rkllm_backend.hpp"
 #include "fix_freq.hpp"
 #include "httplib.h"
+#if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
+#include "image_encoder.hpp"
+#endif
 #include <iostream>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <cstring>
 #include <vector>
@@ -51,6 +55,9 @@ int main(int argc, char* argv[]) {
     int max_new_tokens = 4096;
     std::string prompt_cache_path;
     bool fix_freq = true;
+    std::string encoder_model_path;
+    std::string img_start, img_end, img_content;
+    int encoder_core_num = 1;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--model_path") == 0 && i + 1 < argc) {
@@ -69,12 +76,27 @@ int main(int argc, char* argv[]) {
             prompt_cache_path = argv[++i];
         } else if (strcmp(argv[i], "--no-fix-freq") == 0) {
             fix_freq = false;
+#if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
+        } else if (strcmp(argv[i], "--encoder_model_path") == 0 && i + 1 < argc) {
+            encoder_model_path = argv[++i];
+        } else if (strcmp(argv[i], "--img_start") == 0 && i + 1 < argc) {
+            img_start = argv[++i];
+        } else if (strcmp(argv[i], "--img_end") == 0 && i + 1 < argc) {
+            img_end = argv[++i];
+        } else if (strcmp(argv[i], "--img_content") == 0 && i + 1 < argc) {
+            img_content = argv[++i];
+        } else if (strcmp(argv[i], "--encoder_core_num") == 0 && i + 1 < argc) {
+            encoder_core_num = std::stoi(argv[++i]);
+#endif
         } else if (strcmp(argv[i], "--debug") == 0) {
             debug = true;
         } else if (strcmp(argv[i], "--help") == 0) {
             std::cerr << "Usage: " << argv[0]
                       << " --model_path <path> [--platform auto|rk3588|rk3576|rv1126b|rk3562] [--host 0.0.0.0] [--port 8080]\n"
                       << "       [--max_context_len 4096] [--max_new_tokens 4096] [--prompt_cache <path>]\n"
+#if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
+                      << "       [--encoder_model_path <path>] [--img_start <s>] [--img_end <s>] [--img_content <s>] [--encoder_core_num 1]\n"
+#endif
                       << "       [--no-fix-freq] [--debug]\n"
                       << "       Platform default: auto. Use --no-fix-freq to skip NPU/CPU/GPU/DDR frequency fix (requires root).\n";
             return 0;
@@ -101,14 +123,36 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+#if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
+    if (!encoder_model_path.empty() && img_start.empty()) {
+        img_start = "<|vision_start|>";
+        img_end = "<|vision_end|>";
+        img_content = "<|image_pad|>";
+    }
+#endif
+
     rkllm_openai::RKLLMBackend backend;
-    if (!backend.init(model_path, platform, max_context_len, max_new_tokens, 0.8f, 0.9f, prompt_cache_path)) {
+    if (!backend.init(model_path, platform, max_context_len, max_new_tokens, 0.8f, 0.9f, prompt_cache_path, img_start, img_end, img_content)) {
         std::cerr << "Error: RKLLM init failed.\n";
         return 1;
     }
     std::cout << "RKLLM init success.\n";
 
-    rkllm_openai::ChatHandler chat_handler(&backend, debug);
+    rkllm_openai::EncodeImageFn encode_image;
+#if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
+    std::unique_ptr<rkllm_openai::ImageEncoder> image_encoder;
+    if (!encoder_model_path.empty()) {
+        image_encoder = std::make_unique<rkllm_openai::ImageEncoder>();
+        if (!image_encoder->init(encoder_model_path, encoder_core_num)) {
+            std::cerr << "Error: Image encoder init failed (--encoder_model_path " << encoder_model_path << ").\n";
+            return 1;
+        }
+        std::cout << "Image encoder init success (multimodal enabled).\n";
+        encode_image = [&image_encoder](const std::vector<uint8_t>& bytes) { return image_encoder->encode(bytes); };
+    }
+#endif
+
+    rkllm_openai::ChatHandler chat_handler(&backend, debug, encode_image);
 
     httplib::Server svr;
 

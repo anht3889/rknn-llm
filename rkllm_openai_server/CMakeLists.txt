@@ -43,13 +43,39 @@ else()
     message(FATAL_ERROR "Unsupported CMAKE_SYSTEM_NAME: ${CMAKE_SYSTEM_NAME}")
 endif()
 
-add_executable(rkllm_openai_server
+set(SERVER_SOURCES
     src/main.cpp
     src/rkllm_backend.cpp
     src/chat_handler.cpp
     src/fix_freq.cpp
+    src/base64.cpp
 )
 
+option(ENABLE_MULTIMODAL "Build with image encoder for vision/multimodal models (requires OpenCV, RKNN, multimodal_model_demo)" OFF)
+if(ENABLE_MULTIMODAL)
+    set(MULTIMODAL_DEMO_DIR "${CMAKE_SOURCE_DIR}/../examples/multimodal_model_demo/deploy")
+    if(NOT EXISTS "${MULTIMODAL_DEMO_DIR}/src/image_enc.cc")
+        message(FATAL_ERROR "ENABLE_MULTIMODAL requires examples/multimodal_model_demo/deploy with src/image_enc.cc")
+    endif()
+    if(NOT EXISTS "${MULTIMODAL_DEMO_DIR}/3rdparty/librknnrt")
+        message(FATAL_ERROR "ENABLE_MULTIMODAL requires multimodal demo 3rdparty/librknnrt")
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(OpenCV_DIR "${MULTIMODAL_DEMO_DIR}/3rdparty/opencv/opencv-linux-aarch64/share/OpenCV")
+    endif()
+    find_package(OpenCV REQUIRED)
+    set(RKNN_PATH "${MULTIMODAL_DEMO_DIR}/3rdparty/librknnrt")
+    set(LIBRKNNRT ${RKNN_PATH}/${CMAKE_SYSTEM_NAME}/librknn_api/${TARGET_LIB_ARCH}/librknnrt.so)
+    list(APPEND SERVER_SOURCES ${MULTIMODAL_DEMO_DIR}/src/image_enc.cc src/image_encoder.cpp)
+    include_directories(${MULTIMODAL_DEMO_DIR}/src ${RKNN_PATH}/${CMAKE_SYSTEM_NAME}/librknn_api/include ${OpenCV_INCLUDE_DIRS})
+endif()
+
+add_executable(rkllm_openai_server ${SERVER_SOURCES})
+
+if(ENABLE_MULTIMODAL)
+    target_compile_definitions(rkllm_openai_server PRIVATE RKLLM_OPENAI_ENABLE_MULTIMODAL=1)
+    target_link_libraries(rkllm_openai_server PRIVATE ${OpenCV_LIBS} ${LIBRKNNRT})
+endif()
 target_link_libraries(rkllm_openai_server PRIVATE ${RKLLM_RT_LIB})
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
     target_link_libraries(rkllm_openai_server PRIVATE log OpenMP::OpenMP_CXX)
