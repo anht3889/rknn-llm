@@ -225,16 +225,19 @@ int main(int argc, char* argv[]) {
         auto [audio, content_type] = tts_handler.handle_speech(req.body);
         if (content_type.empty()) {
             res.set_header("Content-Type", "application/json");
+            std::string body_str(audio.begin(), audio.end());
             try {
-                auto err = nlohmann::json::parse(std::string(audio.begin(), audio.end()));
+                auto err = nlohmann::json::parse(body_str);
                 if (err.contains("error") && err["error"].contains("type") && err["error"]["type"] == "server_error")
                     res.status = 500;
                 else
                     res.status = 400;
+                if (err.contains("error") && err["error"].contains("message"))
+                    std::cerr << "[TTS] " << err["error"]["message"].get<std::string>() << std::endl;
             } catch (...) {
                 res.status = 500;
             }
-            res.set_content(std::string(audio.begin(), audio.end()), "application/json");
+            res.set_content(body_str, "application/json");
         } else {
             res.set_header("Content-Type", content_type);
             res.set_content(std::string(audio.begin(), audio.end()), content_type);
