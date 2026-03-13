@@ -27,6 +27,38 @@ void ChatHandler::log_debug_stats(const RunResult& r) const {
               << std::endl;
 }
 
+/* Parse OpenAI-style content: string or array of { type: "text"|"image_url", text?: string, image_url?: { url: "data:image/...;base64,..." } }. */
+static void parse_content(const json& content, std::string& prompt_out, std::vector<std::vector<uint8_t>>& images_out) {
+    prompt_out.clear();
+    images_out.clear();
+    if (content.is_string()) {
+        prompt_out = content.get<std::string>();
+        return;
+    }
+    if (!content.is_array())
+        return;
+    for (const auto& part : content) {
+        if (!part.is_object() || !part.contains("type"))
+            continue;
+        std::string type = part["type"].get<std::string>();
+        if (type == "text" && part.contains("text") && part["text"].is_string()) {
+            prompt_out += part["text"].get<std::string>();
+        } else if (type == "image_url" && part.contains("image_url") && part["image_url"].is_object()) {
+            const auto& img = part["image_url"];
+            std::string url = img.contains("url") && img["url"].is_string() ? img["url"].get<std::string>() : "";
+            const std::string prefix = "data:";
+            size_t comma = url.find(',');
+            if (url.size() > prefix.size() && url.compare(0, prefix.size(), prefix) == 0 && comma != std::string::npos) {
+                std::string b64 = url.substr(comma + 1);
+                std::vector<uint8_t> decoded = rkllm_openai::base64_decode(b64);
+                if (!decoded.empty())
+                    images_out.push_back(std::move(decoded));
+            }
+            prompt_out += "<image>";
+        }
+    }
+}
+
 std::string ChatHandler::handle_chat_completions(const std::string& body, void* res) {
     json data;
     try {
@@ -163,39 +195,6 @@ std::string ChatHandler::handle_chat_completions(const std::string& body, void* 
     if (result.contains("error"))
         return result.dump();
     return result.dump();
-}
-
-/* Parse OpenAI-style content: string or array of { type: "text"|"image_url", text?: string, image_url?: { url: "data:image/...;base64,..." } }. */
-static void parse_content(const json& content, std::string& prompt_out, std::vector<std::vector<uint8_t>>& images_out) {
-    prompt_out.clear();
-    images_out.clear();
-    if (content.is_string()) {
-        prompt_out = content.get<std::string>();
-        return;
-    }
-    if (!content.is_array())
-        return;
-    for (const auto& part : content) {
-        if (!part.is_object() || !part.contains("type"))
-            continue;
-        std::string type = part["type"].get<std::string>();
-        if (type == "text" && part.contains("text") && part["text"].is_string()) {
-            prompt_out += part["text"].get<std::string>();
-        } else if (type == "image_url" && part.contains("image_url") && part["image_url"].is_object()) {
-            const auto& img = part["image_url"];
-            std::string url = img.contains("url") && img["url"].is_string() ? img["url"].get<std::string>() : "";
-            /* data:image/jpeg;base64,<data> or data:image/png;base64,<data> */
-            const std::string prefix = "data:";
-            size_t comma = url.find(',');
-            if (url.size() > prefix.size() && url.compare(0, prefix.size(), prefix) == 0 && comma != std::string::npos) {
-                std::string b64 = url.substr(comma + 1);
-                std::vector<uint8_t> decoded = rkllm_openai::base64_decode(b64);
-                if (!decoded.empty())
-                    images_out.push_back(std::move(decoded));
-            }
-            prompt_out += "<image>";  /* placeholder; model uses img_start/img_end/img_content */
-        }
-    }
 }
 
 json ChatHandler::parse_messages_and_run(const json& data) {
