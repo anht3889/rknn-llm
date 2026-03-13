@@ -2,6 +2,9 @@
 #include "rkllm_backend.hpp"
 #include "fix_freq.hpp"
 #include "tts_handler.hpp"
+#if defined(RKLLM_OPENAI_ENABLE_TTS) && RKLLM_OPENAI_ENABLE_TTS
+#include "piper_tts.hpp"
+#endif
 #include "httplib.h"
 #include <nlohmann/json.hpp>
 #if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
@@ -173,8 +176,25 @@ int main(int argc, char* argv[]) {
 
     rkllm_openai::ChatHandler chat_handler(&backend, debug, encode_image);
 
+#if defined(RKLLM_OPENAI_ENABLE_TTS) && RKLLM_OPENAI_ENABLE_TTS
+    std::unique_ptr<rkllm_openai::PiperTts> piper_tts;
+    rkllm_openai::PiperTts* piper_tts_ptr = nullptr;
+    if (!tts_model_path.empty()) {
+        piper_tts = std::make_unique<rkllm_openai::PiperTts>();
+        if (piper_tts->init(tts_model_path)) {
+            piper_tts_ptr = piper_tts.get();
+            std::cout << "Piper TTS (native C++) enabled: " << tts_model_path << "\n";
+        } else {
+            std::cerr << "Warning: Native Piper TTS init failed for " << tts_model_path << "; use --tts_runner for Python fallback.\n";
+        }
+    }
+#endif
     std::vector<std::string> tts_runner_argv = split_runner_cmd(tts_runner);
-    rkllm_openai::TtsHandler tts_handler(tts_model_path, std::move(tts_runner_argv));
+    rkllm_openai::TtsHandler tts_handler(tts_model_path, std::move(tts_runner_argv)
+#if defined(RKLLM_OPENAI_ENABLE_TTS) && RKLLM_OPENAI_ENABLE_TTS
+                                         , piper_tts_ptr
+#endif
+    );
 
     httplib::Server svr;
     /* Allow long write timeout for streaming (token-by-token) responses. */

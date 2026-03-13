@@ -65,6 +65,19 @@ When built with **multimodal** support (`-DENABLE_MULTIMODAL=ON`, see below):
 - `--tts_model_path`: Path to a Piper TTS model directory (must contain `piper.json`, `.onnx` encoder, and `.rknn` decoder). When set, enables `POST /v1/audio/speech`.
 - `--tts_runner`: Command to run the Piper TTS helper (default: `python3 -m rkllama.scripts.piper_tts_cli`). The runner reads JSON from stdin and writes `Content-Type: <type>\n` plus raw audio to stdout. Requires the rkllama Python package and its Piper dependencies (onnxruntime, rknnlite, piper, pydub) on the device; set `PYTHONPATH` to include rkllama’s `src` directory if the module is not installed.
 
+## Native Piper TTS build (C++)
+
+To run Piper TTS in-process (no Python), build with ONNX Runtime, RKNN, and optional espeak-ng:
+
+```bash
+cmake -DCMAKE_SYSTEM_NAME=Linux -DENABLE_TTS=ON \
+  -DONNXRUNTIME_INCLUDE_DIR=/path/to/onnxruntime/include \
+  -DONNXRUNTIME_LIBRARY=/path/to/onnxruntime/lib/libonnxruntime.so ..
+make
+```
+
+Requirements: ONNX Runtime (C++), RKNN (uses `examples/multimodal_model_demo/deploy/3rdparty/librknnrt`), optional espeak-ng for phonemization. Native TTS outputs WAV only. Run with `--tts_model_path` only (no `--tts_runner`).
+
 ## Multimodal (vision) build
 
 To support image inputs (like `examples/multimodal_model_demo`), build with OpenCV, RKNN runtime, and the demo’s image encoder:

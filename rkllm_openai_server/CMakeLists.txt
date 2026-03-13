@@ -52,6 +52,48 @@ set(SERVER_SOURCES
     src/base64.cpp
 )
 
+option(ENABLE_TTS "Build with native C++ Piper TTS (requires ONNX Runtime, RKNN, optional espeak-ng)" OFF)
+if(ENABLE_TTS)
+    set(MULTIMODAL_DEMO_DIR "${CMAKE_SOURCE_DIR}/../examples/multimodal_model_demo/deploy")
+    if(NOT EXISTS "${MULTIMODAL_DEMO_DIR}/3rdparty/librknnrt")
+        message(FATAL_ERROR "ENABLE_TTS requires examples/multimodal_model_demo/deploy with 3rdparty/librknnrt for RKNN decoder")
+    endif()
+    set(RKNN_PATH "${MULTIMODAL_DEMO_DIR}/3rdparty/librknnrt")
+    set(LIBRKNNRT_TTS ${RKNN_PATH}/${CMAKE_SYSTEM_NAME}/librknn_api/${TARGET_LIB_ARCH}/librknnrt.so)
+    include_directories(${RKNN_PATH}/${CMAKE_SYSTEM_NAME}/librknn_api/include)
+
+    find_path(ONNXRUNTIME_INCLUDE_DIR NAMES onnxruntime_cxx_api.h)
+    find_library(ONNXRUNTIME_LIBRARY NAMES onnxruntime)
+    if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIBRARY)
+        message(FATAL_ERROR "ENABLE_TTS requires ONNX Runtime. Install onnxruntime (e.g. pip install onnxruntime) and set ONNXRUNTIME_INCLUDE_DIR and ONNXRUNTIME_LIBRARY, or use -DONNXRUNTIME_INCLUDE_DIR=... -DONNXRUNTIME_LIBRARY=...")
+    endif()
+
+    find_library(ESPEAK_NG_LIBRARY NAMES espeak-ng libespeak-ng)
+    find_path(ESPEAK_NG_INCLUDE_DIR NAMES speak_lib.h PATH_SUFFIXES espeak-ng)
+    if(ESPEAK_NG_LIBRARY AND ESPEAK_NG_INCLUDE_DIR)
+        set(RKLLM_OPENAI_TTS_USE_ESPEAK 1)
+    endif()
+
+    list(APPEND SERVER_SOURCES
+        src/piper_config.cpp
+        src/piper_encoder.cpp
+        src/piper_decoder.cpp
+        src/piper_phonemizer.cpp
+        src/wav_writer.cpp
+        src/piper_tts.cpp
+    )
+    target_compile_definitions(rkllm_openai_server PRIVATE RKLLM_OPENAI_ENABLE_TTS=1 RKLLM_OPENAI_TTS_USE_ONNX=1 RKLLM_OPENAI_TTS_USE_RKNN=1)
+    if(RKLLM_OPENAI_TTS_USE_ESPEAK)
+        target_compile_definitions(rkllm_openai_server PRIVATE RKLLM_OPENAI_TTS_USE_ESPEAK=1)
+    endif()
+    target_include_directories(rkllm_openai_server PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+    target_link_libraries(rkllm_openai_server PRIVATE ${ONNXRUNTIME_LIBRARY} ${LIBRKNNRT_TTS})
+    if(RKLLM_OPENAI_TTS_USE_ESPEAK)
+        target_include_directories(rkllm_openai_server PRIVATE ${ESPEAK_NG_INCLUDE_DIR})
+        target_link_libraries(rkllm_openai_server PRIVATE ${ESPEAK_NG_LIBRARY})
+    endif()
+endif()
+
 option(ENABLE_MULTIMODAL "Build with image encoder for vision/multimodal models (requires OpenCV, RKNN, multimodal_model_demo)" OFF)
 if(ENABLE_MULTIMODAL)
     set(MULTIMODAL_DEMO_DIR "${CMAKE_SOURCE_DIR}/../examples/multimodal_model_demo/deploy")

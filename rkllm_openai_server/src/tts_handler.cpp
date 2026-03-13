@@ -1,4 +1,5 @@
 #include "tts_handler.hpp"
+#include "piper_tts.hpp"
 #include <nlohmann/json.hpp>
 #include <array>
 #include <cstring>
@@ -12,19 +13,20 @@ namespace rkllm_openai {
 
 using json = nlohmann::json;
 
-TtsHandler::TtsHandler() : tts_model_path_(), runner_argv_() {}
+TtsHandler::TtsHandler() : tts_model_path_(), runner_argv_(), native_tts_(nullptr) {}
 
-TtsHandler::TtsHandler(std::string tts_model_path, std::vector<std::string> runner_argv)
-    : tts_model_path_(std::move(tts_model_path)), runner_argv_(std::move(runner_argv)) {}
+TtsHandler::TtsHandler(std::string tts_model_path, std::vector<std::string> runner_argv, PiperTts* native_tts)
+    : tts_model_path_(std::move(tts_model_path)), runner_argv_(std::move(runner_argv)), native_tts_(native_tts) {}
 
 bool TtsHandler::enabled() const {
+    if (native_tts_ && native_tts_->is_initialized()) return true;
     return !tts_model_path_.empty() && !runner_argv_.empty();
 }
 
 std::pair<std::vector<uint8_t>, std::string> TtsHandler::handle_speech(const std::string& body) const {
     if (!enabled()) {
         json err;
-        err["error"] = {{"message", "TTS not configured. Start server with --tts_model_path and --tts_runner."}, {"type", "invalid_request_error"}};
+        err["error"] = {{"message", "TTS not configured. Start server with --tts_model_path (and --tts_runner for Python, or build with ENABLE_TTS for native C++)."}, {"type", "invalid_request_error"}};
         return {std::vector<uint8_t>(err.dump().begin(), err.dump().end()), ""};
     }
 
@@ -61,6 +63,16 @@ std::pair<std::vector<uint8_t>, std::string> TtsHandler::handle_speech(const std
     double speed = 0.0;
     if (req.contains("speed") && req["speed"].is_number())
         speed = req["speed"].get<double>();
+
+    if (native_tts_ && native_tts_->is_initialized()) {
+        std::vector<uint8_t> wav = native_tts_->synthesize(input, voice, static_cast<float>(speed > 0.0 ? speed : 1.0));
+        if (wav.empty()) {
+            json err;
+            err["error"] = {{"message", "TTS synthesis failed (check phonemizer/model)"}, {"type", "server_error"}};
+            return {std::vector<uint8_t>(err.dump().begin(), err.dump().end()), ""};
+        }
+        return {wav, "audio/wav"};
+    }
 
     json runner_req;
     runner_req["model_path"] = tts_model_path_;

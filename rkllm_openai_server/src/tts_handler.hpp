@@ -7,9 +7,11 @@
 
 namespace rkllm_openai {
 
+class PiperTts;
+
 /**
  * Handler for OpenAI-style POST /v1/audio/speech (Piper TTS only).
- * When enabled, invokes the Piper TTS runner script (e.g. rkllama) and returns audio.
+ * When enabled, uses native C++ Piper (if native_tts is set) or invokes the Python runner.
  */
 class TtsHandler {
 public:
@@ -17,13 +19,12 @@ public:
     TtsHandler();
 
     /**
-     * Enable TTS with the given Piper model path and runner argv.
-     * runner_argv: e.g. {"python3", "-m", "rkllama.scripts.piper_tts_cli"} or {"python3", "/path/to/piper_tts_cli.py"}.
-     * The handler spawns the runner with JSON on stdin; expects "Content-Type: ...\n" then raw audio on stdout.
+     * Enable TTS: native_tts (if non-null and initialized) or runner_argv.
+     * runner_argv: e.g. {"python3", "-m", "rkllama.scripts.piper_tts_cli"} when not using native.
      */
-    TtsHandler(std::string tts_model_path, std::vector<std::string> runner_argv);
+    TtsHandler(std::string tts_model_path, std::vector<std::string> runner_argv, PiperTts* native_tts = nullptr);
 
-    /** Returns true if TTS is enabled (model path and runner set). */
+    /** Returns true if TTS is enabled (native Piper or model path + runner). */
     bool enabled() const;
 
     /**
@@ -35,6 +36,7 @@ public:
 private:
     std::string tts_model_path_;
     std::vector<std::string> runner_argv_;
+    PiperTts* native_tts_ = nullptr;
 };
 
 }  // namespace rkllm_openai
