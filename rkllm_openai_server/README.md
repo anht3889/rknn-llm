@@ -37,13 +37,15 @@ Ensure `librkllmrt.so` is present at `rkllm-runtime/Linux/librkllm_api/aarch64/`
 ## Run
 
 ```bash
-./rkllm_openai_server --model_path /path/to/model.rkllm --platform rk3588 [--host 0.0.0.0] [--port 8080]
+./rkllm_openai_server --model_path /path/to/model.rkllm [--platform auto] [--host 0.0.0.0] [--port 8080]
 ```
+
+On a Rockchip board (e.g. RK3588), platform is auto-detected by default; you can omit `--platform` or pass `--platform rk3588` explicitly.
 
 Options:
 
 - `--model_path` (required): Absolute path to the converted RKLLM model on the device.
-- `--platform`: One of `rk3588`, `rk3576`, `rv1126b`, `rk3562`. Default: `rk3588`.
+- `--platform`: One of `auto`, `rk3588`, `rk3576`, `rv1126b`, `rk3562`. Default: `auto`. When `auto`, the platform is detected from `/proc/device-tree/compatible` (e.g. on a Rockchip RK3588 board you can omit `--platform`).
 - `--host`: Bind address. Default: `0.0.0.0`.
 - `--port`: Port. Default: `8080`.
 - `--max_context_len`: Maximum context length (tokens). Default: `4096`. Lower values reduce KV cache memory and can improve prefill/generate speed on constrained devices.

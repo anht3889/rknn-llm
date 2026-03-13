@@ -2,14 +2,47 @@
 #include "rkllm_backend.hpp"
 #include "httplib.h"
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <cstring>
+#include <vector>
 
 static std::string model_id = "rkllm";
 
+/**
+ * Auto-detect Rockchip platform by reading /proc/device-tree/compatible.
+ * Returns platform string (e.g. "rk3588") or empty if not detected or not supported.
+ */
+static std::string detect_rockchip_platform() {
+    std::ifstream f("/proc/device-tree/compatible", std::ios::binary);
+    if (!f)
+        return {};
+    std::vector<char> buf(
+        (std::istreambuf_iterator<char>(f)),
+        std::istreambuf_iterator<char>());
+    f.close();
+    if (buf.empty())
+        return {};
+    buf.push_back('\0');
+    const char* p = buf.data();
+    while (p < buf.data() + buf.size() - 1) {
+        size_t len = std::strlen(p);
+        if (len == 0) {
+            ++p;
+            continue;
+        }
+        if (strcmp(p, "rockchip,rk3588") == 0) return "rk3588";
+        if (strcmp(p, "rockchip,rk3576") == 0) return "rk3576";
+        if (strcmp(p, "rockchip,rv1126") == 0) return "rv1126b";
+        if (strcmp(p, "rockchip,rk3562") == 0) return "rk3562";
+        p += len + 1;
+    }
+    return {};
+}
+
 int main(int argc, char* argv[]) {
     std::string model_path;
-    std::string platform = "rk3588";
+    std::string platform = "auto";
     std::string host = "0.0.0.0";
     int port = 8080;
     bool debug = false;
@@ -36,9 +69,20 @@ int main(int argc, char* argv[]) {
             debug = true;
         } else if (strcmp(argv[i], "--help") == 0) {
             std::cerr << "Usage: " << argv[0]
-                      << " --model_path <path> [--platform rk3588|rk3576] [--host 0.0.0.0] [--port 8080]\n"
-                      << "       [--max_context_len 4096] [--max_new_tokens 4096] [--prompt_cache <path>] [--debug]\n";
+                      << " --model_path <path> [--platform auto|rk3588|rk3576|rv1126b|rk3562] [--host 0.0.0.0] [--port 8080]\n"
+                      << "       [--max_context_len 4096] [--max_new_tokens 4096] [--prompt_cache <path>] [--debug]\n"
+                      << "       Platform default: auto (detect from /proc/device-tree/compatible).\n";
             return 0;
+        }
+    }
+
+    if (platform == "auto") {
+        platform = detect_rockchip_platform();
+        if (platform.empty()) {
+            platform = "rk3588";
+            std::cerr << "Platform auto-detect failed (not Rockchip or /proc/device-tree missing). Using default: rk3588\n";
+        } else {
+            std::cout << "Detected platform: " << platform << "\n";
         }
     }
 
