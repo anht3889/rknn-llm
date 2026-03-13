@@ -101,33 +101,23 @@ Request body (JSON):
 
 - `model` (optional): Echoed in the response; no effect on inference.
 - `messages`: Array of `{ "role": "user"|"system"|"assistant"|"tool", "content": "..." }`. The last `user` or `tool` message is used as the prompt; `system` is used as system prompt (e.g. for function tools). For **multimodal** (when the server is started with `--encoder_model_path`), `content` may be an array of parts: `{ "type": "text", "text": "..." }` and `{ "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,..." } }`. Text and image parts are combined; the image is encoded by the vision encoder and sent to the LLM with the text (one image per request).
-- `stream` (optional): `true` for newline-delimited JSON stream; `false` or omit for a single JSON response.
+- `stream` (optional): If `true`, the server returns an error (streaming is not supported; the RKLLM runtime does not support token-by-token streaming). Omit or set to `false` for a single JSON response.
 - `enable_thinking` (optional): Enable thinking mode (e.g. Qwen3).
 - `tools` (optional): JSON array of tool definitions for function calling (same format as OpenAI tools).
 
-Response (non-stream): OpenAI-style `chat.completion` with `choices[].message` and `usage`.
+Response: OpenAI-style `chat.completion` with `choices[].message` and `usage`.
 
-Response (stream): Newline-delimited JSON lines, each a `chat.completion.chunk` with `choices[].delta.content` or final chunk with `finish_reason: "stop"` and `usage`.
-
-Example (non-stream):
+Example:
 
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"rkllm","messages":[{"role":"user","content":"Hello"}],"stream":false}'
-```
-
-Example (stream):
-
-```bash
-curl -X POST http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"rkllm","messages":[{"role":"user","content":"Hello"}],"stream":true}'
+  -d '{"model":"rkllm","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
 ## Python client
 
-You can use the existing `examples/rkllm_server_demo/chat_api_flask.py` by changing the URL to `http://<board_ip>:8080/v1/chat/completions` and the request format to the same `model` / `messages` / `stream` JSON (it is already compatible).
+You can use the existing `examples/rkllm_server_demo/chat_api_flask.py` by changing the URL to `http://<board_ip>:8080/v1/chat/completions` and the request format to the same `model` / `messages` JSON. Do not set `stream: true` (streaming is not supported).
 
 ## Concurrency
 
@@ -137,7 +127,6 @@ Only one inference runs at a time (same as the Flask demo). Concurrent requests 
 
 - **Context and generation length**: Use `--max_context_len` and `--max_new_tokens` to match your workload. Smaller values reduce KV cache allocation and often improve both prefill and decode speed on memory-limited boards (e.g. RK3588).
 - **Prompt cache**: For repeated system prompts or fixed prefixes, build a prompt cache once (e.g. with the C++ demo or a one-off run that saves cache via RKLLM API) and pass it with `--prompt_cache <path>`. The server will load it at startup and skip re-prefill for the cached prefix, improving time-to-first-token.
-- **Streaming**: The server uses a condition-variable wait (no fixed 50 ms polling) so streamed chunks are delivered as soon as the runtime produces them, improving perceived latency.
 - **Runtime settings**: The backend already sets `embed_flash = 1` (embeddings from flash) and `keep_history = 0` (no cross-request KV reuse), which keeps memory use and behavior predictable. Further tuning (e.g. `n_batch`, CPU affinity) is available in the RKLLM API if you extend the server.
 
 ## Troubleshooting

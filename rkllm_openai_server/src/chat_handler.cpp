@@ -26,9 +26,7 @@ void ChatHandler::log_debug_stats(const RunResult& r) const {
               << std::endl;
 }
 
-std::string ChatHandler::handle_chat_completions(const std::string& body,
-                                                 bool stream,
-                                                 std::function<void(const std::string&)> stream_write) {
+std::string ChatHandler::handle_chat_completions(const std::string& body) {
     json data;
     try {
         data = json::parse(body);
@@ -44,14 +42,15 @@ std::string ChatHandler::handle_chat_completions(const std::string& body,
         return err.dump();
     }
 
-    if (data.contains("stream") && data["stream"].is_boolean())
-        stream = data["stream"].get<bool>();
+    if (data.contains("stream") && data["stream"].is_boolean() && data["stream"].get<bool>()) {
+        json err;
+        err["error"] = {{"message", "Streaming is not supported by this server."}, {"type", "invalid_request_error"}};
+        return err.dump();
+    }
 
-    json result = parse_messages_and_run(data, stream, stream_write);
+    json result = parse_messages_and_run(data);
     if (result.contains("error"))
         return result.dump();
-    if (stream)
-        return {};
     return result.dump();
 }
 
@@ -88,9 +87,7 @@ static void parse_content(const json& content, std::string& prompt_out, std::vec
     }
 }
 
-json ChatHandler::parse_messages_and_run(const json& data,
-                                         bool stream,
-                                         std::function<void(const std::string&)> stream_write) {
+json ChatHandler::parse_messages_and_run(const json& data) {
     const json& messages = data["messages"];
     bool enable_thinking = data.value("enable_thinking", false);
     std::string model_id = data.value("model", "rkllm");
@@ -160,70 +157,29 @@ json ChatHandler::parse_messages_and_run(const json& data,
 
     const MultimodalInput* multimodal_ptr = multimodal_result ? &multimodal_result->second : nullptr;
 
-    if (!stream) {
-        RunResult run_result = backend_->run(prompt, role, enable_thinking, tools_ptr, sys_ptr, false, nullptr, multimodal_ptr);
-        if (debug_) log_debug_stats(run_result);
-        if (run_result.error) {
-            json err;
-            err["error"] = {{"message", "Inference failed"}, {"type", "server_error"}};
-            return err;
-        }
-        json resp;
-        resp["id"] = id;
-        resp["object"] = "chat.completion";
-        resp["created"] = created;
-        resp["model"] = model_id;
-        resp["choices"] = json::array({
-            {{"index", 0},
-             {"message", {{"role", "assistant"}, {"content", run_result.content}}},
-             {"finish_reason", "stop"}}
-        });
-        resp["usage"] = {
-            {"prompt_tokens", run_result.prefill_tokens},
-            {"completion_tokens", run_result.completion_tokens},
-            {"total_tokens", run_result.prefill_tokens + run_result.completion_tokens}
-        };
-        return resp;
-    }
-
-    std::string full_content;
-    RunResult run_result = backend_->run(prompt, role, enable_thinking, tools_ptr, sys_ptr, true,
-        [&full_content, &stream_write, &id, &model_id, created](const std::string& chunk) {
-            full_content += chunk;
-            json chunk_obj;
-            chunk_obj["id"] = id;
-            chunk_obj["object"] = "chat.completion.chunk";
-            chunk_obj["created"] = created;
-            chunk_obj["model"] = model_id;
-            chunk_obj["choices"] = json::array({
-                {{"index", 0},
-                 {"delta", {{"content", chunk}}},
-                 {"finish_reason", json::value_t::null}}
-            });
-            if (stream_write)
-                stream_write(chunk_obj.dump() + "\n");
-        }, multimodal_ptr);
+    RunResult run_result = backend_->run(prompt, role, enable_thinking, tools_ptr, sys_ptr, multimodal_ptr);
     if (debug_) log_debug_stats(run_result);
-
-    json finish_obj;
-    finish_obj["id"] = id;
-    finish_obj["object"] = "chat.completion.chunk";
-    finish_obj["created"] = created;
-    finish_obj["model"] = model_id;
-    finish_obj["choices"] = json::array({
+    if (run_result.error) {
+        json err;
+        err["error"] = {{"message", "Inference failed"}, {"type", "server_error"}};
+        return err;
+    }
+    json resp;
+    resp["id"] = id;
+    resp["object"] = "chat.completion";
+    resp["created"] = created;
+    resp["model"] = model_id;
+    resp["choices"] = json::array({
         {{"index", 0},
-         {"delta", {}},
+         {"message", {{"role", "assistant"}, {"content", run_result.content}}},
          {"finish_reason", "stop"}}
     });
-    finish_obj["usage"] = {
+    resp["usage"] = {
         {"prompt_tokens", run_result.prefill_tokens},
         {"completion_tokens", run_result.completion_tokens},
         {"total_tokens", run_result.prefill_tokens + run_result.completion_tokens}
     };
-    if (stream_write)
-        stream_write(finish_obj.dump() + "\n");
-
-    return json::object();
+    return resp;
 }
 
 }  // namespace rkllm_openai

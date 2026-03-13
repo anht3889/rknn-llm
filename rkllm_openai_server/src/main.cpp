@@ -2,11 +2,9 @@
 #include "rkllm_backend.hpp"
 #include "fix_freq.hpp"
 #include "httplib.h"
-#include <nlohmann/json.hpp>
 #if defined(RKLLM_OPENAI_ENABLE_MULTIMODAL) && RKLLM_OPENAI_ENABLE_MULTIMODAL
 #include "image_encoder.hpp"
 #endif
-#include <chrono>
 #include <iostream>
 #include <fstream>
 #include <memory>
@@ -169,67 +167,10 @@ int main(int argc, char* argv[]) {
         res.set_header("Content-Type", "application/json");
         res.set_header("Access-Control-Allow-Origin", "*");
 
-        bool stream = false;
-        if (req.has_param("stream"))
-            stream = (req.get_param_value("stream") == "true" || req.get_param_value("stream") == "1");
-        if (!stream && !req.body.empty()) {
-            try {
-                nlohmann::json body_json = nlohmann::json::parse(req.body);
-                if (body_json.contains("stream")) {
-                    if (body_json["stream"].is_boolean())
-                        stream = body_json["stream"].get<bool>();
-                    else if (body_json["stream"].is_string())
-                        stream = (body_json["stream"].get<std::string>() == "true" || body_json["stream"].get<std::string>() == "1");
-                }
-            } catch (const nlohmann::json::exception&) { /* keep stream false */ }
-        }
-        if (req.body.find("\"stream\":true") != std::string::npos)
-            stream = true;
-
-        std::string streamed;
-        auto stream_write = [&streamed](const std::string& chunk) {
-            if (!chunk.empty())
-                streamed += chunk;
-        };
-
-        std::string out;
-        try {
-            out = chat_handler.handle_chat_completions(req.body, stream, stream_write);
-        } catch (const std::exception& e) {
-            if (stream) {
-                int64_t created = std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::system_clock::now().time_since_epoch()).count();
-                nlohmann::json err_chunk;
-                err_chunk["id"] = "chatcmpl-err";
-                err_chunk["object"] = "chat.completion.chunk";
-                err_chunk["created"] = created;
-                err_chunk["model"] = model_id;
-                err_chunk["choices"] = nlohmann::json::array({
-                    {{"index", 0}, {"delta", {{"content", std::string("Error: ") + e.what()}}}, {"finish_reason", "stop"}}
-                });
-                streamed = err_chunk.dump() + "\n";
-            } else {
-                out = "{\"error\":{\"message\":\"" + std::string(e.what()) + "\",\"type\":\"server_error\"}}";
-            }
-        }
-
-        if (stream && streamed.size() > 0) {
-            res.set_content(streamed, "application/x-ndjson");
-        } else if (stream && streamed.empty() && out.empty()) {
-            /* Stream requested but no chunks sent (e.g. backend returned without calling callback). Send one error chunk. */
-            int64_t created = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            std::string err_line = "{\"id\":\"chatcmpl-err\",\"object\":\"chat.completion.chunk\",\"created\":" + std::to_string(created)
-                + ",\"model\":\"" + model_id + "\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"No response generated.\"},\"finish_reason\":\"stop\"}]}\n";
-            res.set_content(err_line, "application/x-ndjson");
-        } else if (!out.empty()) {
-            if (out.find("\"error\"") != std::string::npos && out.find("\"status\":503") != std::string::npos)
-                res.status = 503;
-            res.set_content(out, "application/json");
-        } else {
-            res.status = 500;
-            res.set_content("{\"error\":{\"message\":\"Internal error\",\"type\":\"server_error\"}}", "application/json");
-        }
+        std::string out = chat_handler.handle_chat_completions(req.body);
+        if (out.find("\"error\"") != std::string::npos && out.find("\"status\":503") != std::string::npos)
+            res.status = 503;
+        res.set_content(out, "application/json");
     });
 
     svr.set_error_handler([](const httplib::Request&, httplib::Response& res) {

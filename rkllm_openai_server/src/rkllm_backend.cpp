@@ -1,7 +1,6 @@
 #include "rkllm_backend.hpp"
 #include "rkllm.h"
 #include <cstring>
-#include <vector>
 
 namespace rkllm_openai {
 
@@ -29,8 +28,7 @@ int RKLLMBackend::static_callback(RKLLMResult* result, void* userdata, LLMCallSt
 void RKLLMBackend::push_chunk(const char* text) {
     if (!text) return;
     std::lock_guard<std::mutex> lock(run_mutex_);
-    stream_queue_.push(std::string(text));
-    stream_cv_.notify_one();
+    chunk_queue_.push(std::string(text));
 }
 
 void RKLLMBackend::set_finished(int state, int prefill, int completion, float prefill_ms, float generate_ms) {
@@ -39,8 +37,6 @@ void RKLLMBackend::set_finished(int state, int prefill, int completion, float pr
     completion_tokens_ = completion;
     prefill_time_ms_ = prefill_ms;
     generate_time_ms_ = generate_ms;
-    run_finished_.store(true);
-    stream_cv_.notify_one();
 }
 
 bool RKLLMBackend::init(const std::string& model_path,
@@ -104,8 +100,6 @@ RunResult RKLLMBackend::run(const std::string& prompt,
                            bool enable_thinking,
                            const std::string* tools_json,
                            const std::string* system_prompt,
-                           bool stream,
-                           std::function<void(const std::string&)> on_stream_chunk,
                            const MultimodalInput* multimodal) {
     RunResult out;
     if (!handle_) {
@@ -117,10 +111,9 @@ RunResult RKLLMBackend::run(const std::string& prompt,
 
     {
         std::lock_guard<std::mutex> lock(run_mutex_);
-        while (!stream_queue_.empty()) stream_queue_.pop();
+        while (!chunk_queue_.empty()) chunk_queue_.pop();
     }
     call_state_.store(-1);
-    run_finished_.store(false);
     prefill_tokens_ = 0;
     completion_tokens_ = 0;
     prefill_time_ms_ = 0.f;
@@ -155,29 +148,17 @@ RunResult RKLLMBackend::run(const std::string& prompt,
     rkllm_infer_params.lora_params = nullptr;
     rkllm_infer_params.prompt_cache_params = nullptr;
 
-    /* Always run synchronously. The runtime calls our callback during rkllm_run and we
-     * push chunks to the queue. After run() returns we drain and (if stream) replay to
-     * on_stream_chunk so the client gets NDJSON lines. */
     int ret = rkllm_run(handle_, &rkllm_input, &rkllm_infer_params, this);
 
-    std::vector<std::string> chunks;
+    std::string accumulated;
     {
         std::lock_guard<std::mutex> lock(run_mutex_);
-        while (!stream_queue_.empty()) {
-            chunks.push_back(std::move(stream_queue_.front()));
-            stream_queue_.pop();
+        while (!chunk_queue_.empty()) {
+            accumulated += chunk_queue_.front();
+            chunk_queue_.pop();
         }
     }
-    std::string accumulated;
-    for (const auto& c : chunks)
-        accumulated += c;
-    if (stream && on_stream_chunk) {
-        for (const auto& c : chunks)
-            if (!c.empty()) on_stream_chunk(c);
-    }
-
-    if (!stream)
-        out.content = accumulated;
+    out.content = accumulated;
 
     out.prefill_tokens = prefill_tokens_;
     out.completion_tokens = completion_tokens_;

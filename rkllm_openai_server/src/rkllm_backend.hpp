@@ -7,10 +7,7 @@
 #include <utility>
 #include <vector>
 #include <mutex>
-#include <condition_variable>
 #include <queue>
-#include <functional>
-#include <atomic>
 #include <memory>
 
 namespace rkllm_openai {
@@ -61,8 +58,6 @@ public:
                  bool enable_thinking,
                  const std::string* tools_json,
                  const std::string* system_prompt,
-                 bool stream,
-                 std::function<void(const std::string&)> on_stream_chunk,
                  const MultimodalInput* multimodal = nullptr);
 
     void abort();
@@ -74,10 +69,8 @@ private:
 
     std::mutex serialize_mutex_;  /* one inference at a time */
     mutable std::mutex run_mutex_;
-    std::queue<std::string> stream_queue_;
-    std::condition_variable stream_cv_;
+    std::queue<std::string> chunk_queue_;  /* filled by callback during rkllm_run */
     std::atomic<int> call_state_{ -1 };
-    std::atomic<bool> run_finished_{ false };
     int prefill_tokens_ = 0;
     int completion_tokens_ = 0;
     float prefill_time_ms_ = 0.f;

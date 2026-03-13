@@ -17,18 +17,14 @@ class ChatHandler {
 public:
     ChatHandler(RKLLMBackend* backend, bool debug = false, EncodeImageFn encode_image = nullptr);
 
-    std::string handle_chat_completions(const std::string& body,
-                                        bool stream,
-                                        std::function<void(const std::string&)> stream_write);
+    std::string handle_chat_completions(const std::string& body);
 
 private:
     RKLLMBackend* backend_;
     bool debug_;
     EncodeImageFn encode_image_;
 
-    nlohmann::json parse_messages_and_run(const nlohmann::json& data,
-                                          bool stream,
-                                          std::function<void(const std::string&)> stream_write);
+    nlohmann::json parse_messages_and_run(const nlohmann::json& data);
     void log_debug_stats(const RunResult& r) const;
 };
 
