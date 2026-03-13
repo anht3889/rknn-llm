@@ -85,8 +85,12 @@ bool PiperEncoder::run(const int64_t* phoneme_ids, size_t num_phonemes,
         input_tensors.push_back(Ort::Value::CreateTensor(mem_info, sid_data.data(), sizeof(int64_t), std::vector<int64_t>{1}.data(), 1));
     }
 
-    const char* output_names[] = {"z", "y_mask"};
-    auto output_tensors = sess->Run(Ort::RunOptions{nullptr}, input_names.data(), input_tensors.data(), input_tensors.size(), output_names, 2);
+    size_t num_outputs = sess->GetOutputCount();
+    if (num_outputs < 2) return false;
+    auto out0_name = sess->GetOutputNameAllocated(0, allocator);
+    auto out1_name = sess->GetOutputNameAllocated(1, allocator);
+    std::vector<const char*> run_output_names = {out0_name.get(), out1_name.get()};
+    auto output_tensors = sess->Run(Ort::RunOptions{nullptr}, input_names.data(), input_tensors.data(), input_tensors.size(), run_output_names.data(), 2);
 
     auto& z_tensor = output_tensors[0];
     auto& y_mask_tensor = output_tensors[1];
