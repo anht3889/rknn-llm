@@ -1,5 +1,6 @@
 #include "wav_writer.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace rkllm_openai {
@@ -37,8 +38,18 @@ std::vector<uint8_t> wav_bytes_from_float_mono(const float* samples, size_t num_
     memcpy(p, "data", 4); p += 4;
     write32(static_cast<uint32_t>(data_bytes));
 
+    float max_abs = 0.f;
     for (size_t i = 0; i < num_samples; i++) {
-        float s = std::max(-1.f, std::min(1.f, samples[i]));
+        float a = std::fabs(samples[i]);
+        if (a > max_abs && std::isnormal(a)) max_abs = a;
+    }
+    float gain = 1.f;
+    if (max_abs > 1e-6f)
+        gain = 0.95f / max_abs;
+
+    for (size_t i = 0; i < num_samples; i++) {
+        float s = samples[i] * gain;
+        s = std::max(-1.f, std::min(1.f, s));
         int16_t v = static_cast<int16_t>(s * 32767.f);
         p[0] = static_cast<uint8_t>(v & 0xff);
         p[1] = static_cast<uint8_t>((v >> 8) & 0xff);
